@@ -7,6 +7,8 @@ run
 
 >npm run build
 
+>uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
 the dist folder is then mirrored to /var/www/dist which is served by nginx
 
 
