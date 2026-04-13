@@ -32,6 +32,31 @@ def parse_amount(value: Any) -> float:
         return 0.0
 
 
+def collect_wallet_addresses(chain_data: Dict[str, Any]) -> set[str]:
+    wallet_addresses: set[str] = set()
+
+    chain_wallet_address = chain_data.get("wallet_address")
+    if isinstance(chain_wallet_address, str) and chain_wallet_address.strip():
+        wallet_addresses.add(chain_wallet_address.strip())
+
+    for block in chain_data.get("blocks", []):
+        description = block.get("description")
+        if isinstance(description, str) and description.strip():
+            wallet_addresses.add(description.strip())
+
+        for transaction in block.get("transactions", []):
+            sender = transaction.get("sender")
+            receiver = transaction.get("receiver")
+
+            if isinstance(sender, str) and sender.strip():
+                wallet_addresses.add(sender.strip())
+
+            if isinstance(receiver, str) and receiver.strip():
+                wallet_addresses.add(receiver.strip())
+
+    return wallet_addresses
+
+
 def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str, Any]) -> Dict[str, Any]:
     blocks = chain_data.get("blocks", [])
     sent_count = 0
@@ -96,15 +121,14 @@ async def get_wallet_balance(wallet_address: str) -> float | None:
 
 
 async def get_wallet_summary(wallet_address: str) -> Dict[str, Any]:
-    balance = await get_wallet_balance(wallet_address)
-
-    if balance is None:
-        raise HTTPException(status_code=404, detail="Wallet address not found")
-
     async with blockchain_lock:
         chain_data = dict(blockchain)
 
-    return build_wallet_stats(wallet_address, balance, chain_data)
+    if wallet_address not in collect_wallet_addresses(chain_data):
+        raise HTTPException(status_code=404, detail="Wallet address not found in blockchain data")
+
+    balance = await get_wallet_balance(wallet_address)
+    return build_wallet_stats(wallet_address, balance or 0.0, chain_data)
 
 
 def parse_penger_file(text: str) -> Dict[str, float]:
