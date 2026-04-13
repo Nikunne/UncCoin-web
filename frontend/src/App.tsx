@@ -37,9 +37,8 @@ export default function App() {
     return (
         <div className="balances-page">
             <header className="masthead">
-                <p className="masthead-kicker">internet money bulletin</p>
                 <h1 className="balances-title">UncCoin</h1>
-                <p className="masthead-subtitle">The most genuine crpytocurrency ever*</p>
+                <p className="masthead-subtitle">The most genuine cryptocurrency ever*</p>
             </header>
 
             <section className="balances-shell" aria-label="UncCoin balances">
@@ -65,7 +64,7 @@ export default function App() {
                         target="_blank"
                         rel="noreferrer"
                     >
-                        Github-link for this repo
+                        Github-link for UncCoin-web
                     </a>
                 </div>
 
@@ -77,7 +76,9 @@ export default function App() {
                         </div>
                     ))}
                 </div>
+                <p>*Heard at Sit Hangaren, April 2026</p>
             </section>
+
         </div>
     );
 }
