@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""
+
 
 #This runs in the UncCoin-repo
 import subprocess
@@ -76,3 +78,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+"""

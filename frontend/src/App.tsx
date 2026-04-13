@@ -39,7 +39,7 @@ export default function App() {
             <header className="masthead">
                 <p className="masthead-kicker">internet money bulletin</p>
                 <h1 className="balances-title">UncCoin</h1>
-                <p className="masthead-subtitle">Old-school ledger vibes for the latest balance board.</p>
+                <p className="masthead-subtitle">The most genuine crpytocurrency ever*</p>
             </header>
 
             <section className="balances-shell" aria-label="UncCoin balances">
