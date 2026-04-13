@@ -37,8 +37,10 @@ export default function App() {
     return (
         <div className="balances-page">
             <h1 className="balances-title">₿ Balances</h1>
-            <a>Github-link for UncCoin</a>
-            <a>Github-link for this repo</a>
+            <a href={"https://github.com/Fleli/UncCoin#"}>Github-link for UncCoin</a>
+            <p></p>
+
+            <a href={"https://github.com/Nikunne/UncCoin-web"}>Github-link for UncCoin-web</a>
             <p className="last-updated">
                 Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "loading..."}
             </p>
