@@ -5,6 +5,7 @@ import "./App.css";
 export default function App() {
     const [balances, setBalances] = useState<BalanceRow[]>([]);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const totalUncCoins = balances.reduce((sum, [, amount]) => sum + amount, 0);
 
     useEffect(() => {
         let active = true;
@@ -44,28 +45,31 @@ export default function App() {
             <section className="balances-shell" aria-label="UncCoin balances">
                 <div className="balances-meta">
                     <span className="balances-section-title">Balance Sheet</span>
+                    <p className="total-unc-coins">Total UncCoins: {totalUncCoins}</p>
+                </div>
+
+                <div className="balances-submeta">
+                    <div className="repo-notes" aria-label="Project notes">
+                        <a
+                            className="repo-link"
+                            href="https://github.com/Fleli/UncCoin"
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            Github-link for UncCoin
+                        </a>
+                        <a
+                            className="repo-link"
+                            href="https://github.com/Nikunne/UncCoin-web"
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            Github-link for UncCoin-web
+                        </a>
+                    </div>
                     <p className="last-updated">
                         Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "loading..."}
                     </p>
-                </div>
-
-                <div className="repo-notes" aria-label="Project notes">
-                    <a
-                        className="repo-link"
-                        href="https://github.com/Fleli/UncCoin"
-                        target="_blank"
-                        rel="noreferrer"
-                    >
-                        Github-link for UncCoin
-                    </a>
-                    <a
-                        className="repo-link"
-                        href="https://github.com/Nikunne/UncCoin-web"
-                        target="_blank"
-                        rel="noreferrer"
-                    >
-                        Github-link for UncCoin-web
-                    </a>
                 </div>
 
                 <div className="balances-card">
