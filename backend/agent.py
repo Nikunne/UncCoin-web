@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""
+
+#Wallet and node is already created and ran once
+
 
 
 #This runs in the UncCoin-repo
@@ -78,4 +80,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-"""
