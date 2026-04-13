@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { Link, Route, Routes } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, Route, Routes, useNavigate } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
 import { getBlockchain, type BlockchainBlock, type BlockchainResponse } from "./api/blockchain";
+import { getWalletSummary, loginWithWallet, type WalletSummary } from "./api/wallet";
 import "./App.css";
 
 const INITIAL_BLOCKS_VISIBLE = 25;
@@ -11,6 +12,7 @@ const CHART_HEIGHT = 352;
 const CHART_PADDING = 64;
 const CHART_TICK_COUNT = 6;
 const CHART_Y_TICK_COUNT = 5;
+const WALLET_SESSION_KEY = "unc-wallet-address";
 
 function formatTimestamp(timestamp: string): string {
     const parsed = new Date(timestamp);
@@ -32,6 +34,10 @@ function truncateHash(hash: string): string {
 function parseAmount(value: string): number {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatWalletAmount(value: number): string {
+    return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "0";
 }
 
 type SupplyPoint = {
@@ -83,6 +89,14 @@ function buildSupplySeries(blocks: BlockchainBlock[]): SupplyPoint[] {
     }
 
     return series;
+}
+
+function loadStoredWalletAddress(): string {
+    if (typeof window === "undefined") {
+        return "";
+    }
+
+    return window.localStorage.getItem(WALLET_SESSION_KEY) ?? "";
 }
 
 function getTickIndices(length: number, desiredCount: number): number[] {
@@ -203,6 +217,11 @@ function HomePage() {
                         View stats
                     </Link>
                 </div>
+                <div className="investment-cta">
+                    <Link className="investment-link" to="/login">
+                        Wallet login
+                    </Link>
+                </div>
             </div>
 
             <section className="balances-shell" aria-label="UncCoin balances">
@@ -276,6 +295,253 @@ function HomePage() {
                     Copied wallet address: {copiedToast}
                 </div>
             ) : null}
+        </div>
+    );
+}
+
+function LoginPage() {
+    const navigate = useNavigate();
+    const [walletAddress, setWalletAddress] = useState("");
+    const [password, setPassword] = useState("1234");
+    const [errorMessage, setErrorMessage] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        const storedWalletAddress = loadStoredWalletAddress();
+        if (storedWalletAddress) {
+            navigate("/wallet", { replace: true });
+        }
+    }, [navigate]);
+
+    const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        setErrorMessage("");
+        setIsSubmitting(true);
+
+        try {
+            const wallet = await loginWithWallet(walletAddress, password);
+            window.localStorage.setItem(WALLET_SESSION_KEY, wallet.wallet_address);
+            navigate("/wallet");
+        } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : "Failed to log in");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="balances-page">
+            <header className="masthead masthead-left">
+                <p className="masthead-kicker">Wallet Access</p>
+                <h1 className="balances-title">UncCoin Login</h1>
+                <p className="masthead-subtitle">
+                    Log in with your wallet address. Temporary password for now: 1234.
+                </p>
+            </header>
+
+            <div className="page-actions">
+                <div className="investment-cta">
+                    <Link className="investment-link" to="/">
+                        Back to balances
+                    </Link>
+                </div>
+                <div className="investment-cta">
+                    <Link className="investment-link" to="/blockchain">
+                        View blockchain
+                    </Link>
+                </div>
+            </div>
+
+            <section className="balances-shell login-shell" aria-label="Wallet login">
+                <form className="wallet-login-form" onSubmit={onSubmit}>
+                    <label className="wallet-login-field">
+                        <span className="chain-stat-label">Wallet address</span>
+                        <input
+                            className="wallet-login-input"
+                            value={walletAddress}
+                            onChange={(event) => {
+                                setWalletAddress(event.target.value);
+                            }}
+                            autoComplete="username"
+                            placeholder="Enter wallet address"
+                        />
+                    </label>
+                    <label className="wallet-login-field">
+                        <span className="chain-stat-label">Password</span>
+                        <input
+                            className="wallet-login-input"
+                            type="password"
+                            value={password}
+                            onChange={(event) => {
+                                setPassword(event.target.value);
+                            }}
+                            autoComplete="current-password"
+                        />
+                    </label>
+                    <div className="wallet-login-actions">
+                        <button className="investment-link investment-button" type="submit" disabled={isSubmitting}>
+                            {isSubmitting ? "Logging in..." : "Log in"}
+                        </button>
+                    </div>
+                    {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
+                </form>
+            </section>
+        </div>
+    );
+}
+
+function WalletDashboardPage() {
+    const navigate = useNavigate();
+    const [walletAddress, setWalletAddress] = useState("");
+    const [wallet, setWallet] = useState<WalletSummary | null>(null);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [errorMessage, setErrorMessage] = useState("");
+
+    useEffect(() => {
+        const storedWalletAddress = loadStoredWalletAddress();
+
+        if (!storedWalletAddress) {
+            navigate("/login", { replace: true });
+            return;
+        }
+
+        setWalletAddress(storedWalletAddress);
+    }, [navigate]);
+
+    useEffect(() => {
+        if (!walletAddress) {
+            return;
+        }
+
+        let active = true;
+
+        const load = async () => {
+            try {
+                const data = await getWalletSummary(walletAddress);
+                if (active) {
+                    setWallet(data);
+                    setLastUpdated(new Date());
+                    setErrorMessage("");
+                }
+            } catch (error) {
+                if (active) {
+                    const message = error instanceof Error ? error.message : "Failed to load wallet";
+                    setErrorMessage(message);
+                    if (message.toLowerCase().includes("not found")) {
+                        window.localStorage.removeItem(WALLET_SESSION_KEY);
+                        navigate("/login", { replace: true });
+                    }
+                }
+            }
+        };
+
+        void load();
+        const timer = window.setInterval(() => {
+            void load();
+        }, 10_000);
+
+        return () => {
+            active = false;
+            window.clearInterval(timer);
+        };
+    }, [navigate, walletAddress]);
+
+    const logOut = () => {
+        window.localStorage.removeItem(WALLET_SESSION_KEY);
+        navigate("/login");
+    };
+
+    return (
+        <div className="balances-page">
+            <header className="masthead masthead-left">
+                <p className="masthead-kicker">Wallet Dashboard</p>
+                <h1 className="balances-title">My UncCoin Wallet</h1>
+                <p className="masthead-subtitle">
+                    Wallet-specific balance and activity pulled from the live balance sheet and blockchain data.
+                </p>
+            </header>
+
+            <div className="page-actions">
+                <div className="investment-cta">
+                    <Link className="investment-link" to="/">
+                        Back to balances
+                    </Link>
+                </div>
+                <div className="investment-cta">
+                    <Link className="investment-link" to="/blockchain">
+                        View blockchain
+                    </Link>
+                </div>
+                <div className="investment-cta">
+                    <button className="investment-link investment-button" type="button" onClick={logOut}>
+                        Log out
+                    </button>
+                </div>
+            </div>
+
+            <section className="balances-shell" aria-label="Logged in wallet">
+                <div className="balances-meta">
+                    <span className="balances-section-title">Logged In Wallet</span>
+                    <p className="last-updated">
+                        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "loading..."}
+                    </p>
+                </div>
+
+                <div className="chain-wallet-card">
+                    <span className="chain-stat-label">Wallet Address</span>
+                    <code className="chain-wallet-value">{walletAddress || "loading..."}</code>
+                </div>
+
+                {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
+
+                <div className="chain-stats">
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Balance</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.balance ?? 0)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Transactions</span>
+                        <strong className="chain-stat-value">{wallet?.transaction_count ?? 0}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Received</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_received ?? 0)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Sent</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_sent ?? 0)}</strong>
+                    </article>
+                </div>
+
+                <div className="chain-stats wallet-stats-grid">
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Incoming Tx</span>
+                        <strong className="chain-stat-value">{wallet?.received_count ?? 0}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Outgoing Tx</span>
+                        <strong className="chain-stat-value">{wallet?.sent_count ?? 0}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Fees Paid</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_fees_paid ?? 0)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Active Blocks</span>
+                        <strong className="chain-stat-value">{wallet?.block_appearance_count ?? 0}</strong>
+                    </article>
+                </div>
+
+                <article className="chain-wallet-card wallet-activity-card">
+                    <span className="chain-stat-label">Latest Activity</span>
+                    <strong className="wallet-activity-value">
+                        {wallet?.latest_activity ? formatTimestamp(wallet.latest_activity) : "No on-chain activity yet"}
+                    </strong>
+                    <p className="wallet-activity-meta">
+                        Mined blocks: {wallet?.mined_block_count ?? 0}
+                    </p>
+                </article>
+            </section>
         </div>
     );
 }
@@ -354,6 +620,11 @@ function StatPage() {
                 <div className="investment-cta">
                     <Link className="investment-link" to="/blockchain">
                         View blockchain
+                    </Link>
+                </div>
+                <div className="investment-cta">
+                    <Link className="investment-link" to="/login">
+                        Wallet login
                     </Link>
                 </div>
             </div>
@@ -640,6 +911,11 @@ function BlockchainPage() {
                     </Link>
                 </div>
                 <div className="investment-cta">
+                    <Link className="investment-link" to="/login">
+                        Wallet login
+                    </Link>
+                </div>
+                <div className="investment-cta">
                     <button className="investment-link investment-button" type="button" onClick={scrollToBottom}>
                         Scroll to bottom
                     </button>
@@ -796,6 +1072,8 @@ export default function App() {
     return (
         <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/wallet" element={<WalletDashboardPage />} />
             <Route path="/blockchain" element={<BlockchainPage />} />
             <Route path="/stat" element={<StatPage />} />
         </Routes>

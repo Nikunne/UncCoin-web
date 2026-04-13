@@ -121,6 +121,10 @@
   box-shadow: 0 18px 36px rgba(0, 0, 0, 0.3);
 }
 
+.login-shell {
+  max-width: 640px;
+}
+
 .balances-meta {
   display: flex;
   justify-content: space-between;
@@ -339,6 +343,58 @@
   color: #fff0c9;
   font-size: 0.94rem;
   line-height: 1.35;
+}
+
+.wallet-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.wallet-login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wallet-login-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 220, 156, 0.4);
+  background: rgba(20, 10, 4, 0.45);
+  color: #fff0c9;
+  font: inherit;
+}
+
+.wallet-login-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.wallet-login-error {
+  margin: 0;
+  color: #ffbf98;
+  font-weight: 700;
+}
+
+.wallet-stats-grid {
+  margin-top: 12px;
+}
+
+.wallet-activity-card {
+  margin-top: 18px;
+}
+
+.wallet-activity-value {
+  display: block;
+  color: #fff0c9;
+  font-size: 1.1rem;
+}
+
+.wallet-activity-meta {
+  margin: 10px 0 0;
+  color: #f0d4a0;
 }
 
 .chain-wallet-card {
@@ -596,6 +652,11 @@
 
   .balances-shell {
     padding: 12px;
+  }
+
+  .wallet-login-actions,
+  .wallet-login-actions .investment-link {
+    width: 100%;
   }
 
   .repo-notes {

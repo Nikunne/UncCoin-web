@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 
 PENGER_FILE = Path(__file__).parent / "penger.txt"
@@ -16,6 +17,94 @@ balances_lock = asyncio.Lock()
 blockchain: Dict[str, Any] = {}
 blockchain_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
+TEMP_WALLET_PASSWORD = "1234"
+
+
+class WalletLoginRequest(BaseModel):
+    wallet_address: str
+    password: str
+
+
+def parse_amount(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str, Any]) -> Dict[str, Any]:
+    blocks = chain_data.get("blocks", [])
+    sent_count = 0
+    received_count = 0
+    total_sent = 0.0
+    total_received = 0.0
+    total_fees_paid = 0.0
+    mined_block_count = 0
+    block_appearance_count = 0
+    latest_activity: str | None = None
+
+    for block in blocks:
+        transactions = block.get("transactions", [])
+        block_has_wallet_activity = False
+
+        for transaction in transactions:
+            amount = parse_amount(transaction.get("amount"))
+            fee = parse_amount(transaction.get("fee"))
+            sender = transaction.get("sender")
+            receiver = transaction.get("receiver")
+            timestamp = transaction.get("timestamp")
+
+            if sender == wallet_address:
+                sent_count += 1
+                total_sent += amount
+                total_fees_paid += fee
+                block_has_wallet_activity = True
+                if timestamp:
+                    latest_activity = timestamp
+
+            if receiver == wallet_address:
+                received_count += 1
+                total_received += amount
+                block_has_wallet_activity = True
+                if timestamp:
+                    latest_activity = timestamp
+
+        if block.get("description") == wallet_address:
+            mined_block_count += 1
+
+        if block_has_wallet_activity:
+            block_appearance_count += 1
+
+    return {
+        "wallet_address": wallet_address,
+        "balance": balance,
+        "transaction_count": sent_count + received_count,
+        "sent_count": sent_count,
+        "received_count": received_count,
+        "total_sent": total_sent,
+        "total_received": total_received,
+        "total_fees_paid": total_fees_paid,
+        "mined_block_count": mined_block_count,
+        "block_appearance_count": block_appearance_count,
+        "latest_activity": latest_activity,
+    }
+
+
+async def get_wallet_balance(wallet_address: str) -> float | None:
+    async with balances_lock:
+        return balances.get(wallet_address)
+
+
+async def get_wallet_summary(wallet_address: str) -> Dict[str, Any]:
+    balance = await get_wallet_balance(wallet_address)
+
+    if balance is None:
+        raise HTTPException(status_code=404, detail="Wallet address not found")
+
+    async with blockchain_lock:
+        chain_data = dict(blockchain)
+
+    return build_wallet_stats(wallet_address, balance, chain_data)
 
 
 def parse_penger_file(text: str) -> Dict[str, float]:
@@ -136,6 +225,28 @@ async def get_balances() -> Dict[str, float]:
 async def get_blockchain() -> Dict[str, Any]:
     async with blockchain_lock:
         return dict(blockchain)
+
+
+@app.post("/wallet-login")
+async def wallet_login(payload: WalletLoginRequest) -> Dict[str, Any]:
+    wallet_address = payload.wallet_address.strip()
+
+    if not wallet_address:
+        raise HTTPException(status_code=400, detail="Wallet address is required")
+
+    if payload.password != TEMP_WALLET_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid wallet address or password")
+
+    summary = await get_wallet_summary(wallet_address)
+    return {
+        "ok": True,
+        "wallet": summary,
+    }
+
+
+@app.get("/wallets/{wallet_address}")
+async def get_wallet(wallet_address: str) -> Dict[str, Any]:
+    return await get_wallet_summary(wallet_address)
 
 
 @app.get("/health")
