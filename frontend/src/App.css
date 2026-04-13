@@ -521,6 +521,21 @@
   border-color: rgba(255, 220, 156, 0.85);
 }
 
+.copy-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1100;
+  max-width: min(30rem, calc(100vw - 24px));
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 220, 156, 0.65);
+  background: rgba(20, 10, 4, 0.94);
+  color: #fff0c9;
+  font-size: 0.88rem;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  overflow-wrap: anywhere;
+}
+
 .empty-state {
   margin: 0;
 }
@@ -644,5 +659,12 @@
   .scroll-top-button {
     right: 12px;
     bottom: 12px;
+  }
+
+  .copy-toast {
+    right: 12px;
+    bottom: 60px;
+    max-width: calc(100vw - 24px);
+    font-size: 0.8rem;
   }
 }

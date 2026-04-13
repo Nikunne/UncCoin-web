@@ -123,6 +123,7 @@ function HomePage() {
     const [balances, setBalances] = useState<BalanceRow[]>([]);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [copiedUser, setCopiedUser] = useState<string | null>(null);
+    const [copiedToast, setCopiedToast] = useState<string | null>(null);
     const totalUncCoins = balances.reduce((sum, [, amount]) => sum + amount, 0);
 
     useEffect(() => {
@@ -157,9 +158,13 @@ function HomePage() {
         try {
             await navigator.clipboard.writeText(user);
             setCopiedUser(user);
+            setCopiedToast(user);
             window.setTimeout(() => {
                 setCopiedUser((current) => (current === user ? null : current));
-            }, 1500);
+            }, 2000);
+            window.setTimeout(() => {
+                setCopiedToast((current) => (current === user ? null : current));
+            }, 2000);
         } catch (error) {
             console.error(error);
         }
@@ -256,6 +261,12 @@ function HomePage() {
                 </div>
                 <p>*Heard at Sit Hangaren, April 2026</p>
             </section>
+
+            {copiedToast ? (
+                <div className="copy-toast" role="status" aria-live="polite">
+                    Copied wallet address: {copiedToast}
+                </div>
+            ) : null}
         </div>
     );
 }
