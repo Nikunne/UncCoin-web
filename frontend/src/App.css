@@ -166,11 +166,137 @@
 }
 
 .total-unc-coins {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
   margin: 0;
   color: #ffe6ab;
   font-size: 1rem;
   font-weight: 700;
   text-align: right;
+}
+
+.total-unc-coins-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08rem;
+}
+
+.split-flap-total {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.split-flap-cell {
+  position: relative;
+  display: inline-block;
+  width: 0.92em;
+  height: 1.3em;
+  border: 1px solid rgba(255, 228, 161, 0.28);
+  border-radius: 4px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(48, 35, 22, 0.98) 0%, rgba(23, 15, 10, 0.98) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 244, 214, 0.08), 0 4px 10px rgba(0, 0, 0, 0.28);
+  color: #fff2c8;
+  font-size: 1.15rem;
+  line-height: 1;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.75);
+}
+
+.split-flap-cell::after {
+  content: "";
+  position: absolute;
+  inset: calc(50% - 1px) 0 auto;
+  height: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 0 rgba(255, 236, 195, 0.08);
+  z-index: 4;
+}
+
+.split-flap-cell.is-blank {
+  opacity: 0.45;
+}
+
+.split-flap-static,
+.split-flap-card {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  backface-visibility: hidden;
+}
+
+.split-flap-static {
+  z-index: 1;
+}
+
+.split-flap-static-top,
+.split-flap-card-front {
+  top: 0;
+  height: 50%;
+  align-items: flex-start;
+  padding-top: 0.12em;
+}
+
+.split-flap-static-bottom,
+.split-flap-card-back {
+  bottom: 0;
+  height: 50%;
+  align-items: flex-end;
+  padding-bottom: 0.14em;
+}
+
+.split-flap-static-top {
+  background: linear-gradient(180deg, rgba(83, 62, 42, 0.95), rgba(39, 28, 18, 0.98));
+}
+
+.split-flap-static-bottom {
+  background: linear-gradient(180deg, rgba(28, 20, 13, 0.98), rgba(13, 9, 6, 0.98));
+}
+
+.split-flap-card {
+  z-index: 3;
+  background: linear-gradient(180deg, rgba(104, 77, 51, 0.96), rgba(29, 20, 13, 0.98));
+}
+
+.split-flap-card-front {
+  transform-origin: bottom center;
+  animation: split-flap-front 0.34s ease-in forwards;
+}
+
+.split-flap-card-back {
+  transform-origin: top center;
+  transform: rotateX(90deg);
+  animation: split-flap-back 0.34s ease-out forwards;
+  animation-delay: 0.34s;
+}
+
+.split-flap-cell.is-flipping .split-flap-static-top {
+  z-index: 2;
+}
+
+@keyframes split-flap-front {
+  from {
+    transform: rotateX(0deg);
+  }
+
+  to {
+    transform: rotateX(-90deg);
+  }
+}
+
+@keyframes split-flap-back {
+  from {
+    transform: rotateX(90deg);
+  }
+
+  to {
+    transform: rotateX(0deg);
+  }
 }
 
 .last-updated {
@@ -700,6 +826,13 @@
   .last-updated,
   .balance-amount {
     text-align: left;
+  }
+
+  .total-unc-coins {
+    align-items: flex-start;
+    justify-content: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .balance-row {

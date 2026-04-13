@@ -40,6 +40,20 @@ function formatWalletAmount(value: number): string {
     return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "0";
 }
 
+function formatTotalAmount(value: number): string {
+    return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0";
+}
+
+function usePrevious<T>(value: T): T | undefined {
+    const [previous, setPrevious] = useState<T>();
+
+    useEffect(() => {
+        setPrevious(value);
+    }, [value]);
+
+    return previous;
+}
+
 type SupplyPoint = {
     timestamp: string;
     totalSupply: number;
@@ -122,6 +136,78 @@ type YAxisTick = {
     value: number;
     y: number;
 };
+
+type SplitFlapCellProps = {
+    currentChar: string;
+    nextChar: string;
+    delay: number;
+};
+
+function SplitFlapCell({ currentChar, nextChar, delay }: SplitFlapCellProps) {
+    const [isFlipping, setIsFlipping] = useState(false);
+
+    useEffect(() => {
+        if (currentChar === nextChar) {
+            setIsFlipping(false);
+            return;
+        }
+
+        setIsFlipping(true);
+        const timeoutId = window.setTimeout(() => {
+            setIsFlipping(false);
+        }, 420 + delay);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [currentChar, nextChar, delay]);
+
+    const topChar = isFlipping ? currentChar : nextChar;
+    const bottomChar = nextChar;
+    const isBlank = nextChar === " ";
+
+    return (
+        <span
+            className={`split-flap-cell${isFlipping ? " is-flipping" : ""}${isBlank ? " is-blank" : ""}`}
+            style={{ animationDelay: `${delay}ms` }}
+            aria-hidden="true"
+        >
+            <span className="split-flap-static split-flap-static-top">{topChar}</span>
+            <span className="split-flap-static split-flap-static-bottom">{bottomChar}</span>
+            {isFlipping ? (
+                <>
+                    <span className="split-flap-card split-flap-card-front">{currentChar}</span>
+                    <span className="split-flap-card split-flap-card-back">{nextChar}</span>
+                </>
+            ) : null}
+        </span>
+    );
+}
+
+type SplitFlapTotalProps = {
+    value: number;
+};
+
+function SplitFlapTotal({ value }: SplitFlapTotalProps) {
+    const formattedValue = formatTotalAmount(value);
+    const previousValue = usePrevious(formattedValue) ?? formattedValue;
+    const length = Math.max(previousValue.length, formattedValue.length);
+    const currentChars = previousValue.padStart(length, " ").split("");
+    const nextChars = formattedValue.padStart(length, " ").split("");
+
+    return (
+        <span className="split-flap-total" aria-label={`Total UncCoins: ${formattedValue}`}>
+            {nextChars.map((nextChar, index) => (
+                <SplitFlapCell
+                    key={`${index}-${currentChars[index]}-${nextChar}`}
+                    currentChar={currentChars[index]}
+                    nextChar={nextChar}
+                    delay={index * 45}
+                />
+            ))}
+        </span>
+    );
+}
 
 function buildYAxisTicks(maxSupply: number): YAxisTick[] {
     return Array.from({ length: CHART_Y_TICK_COUNT }, (_, index) => {
@@ -227,7 +313,10 @@ function HomePage() {
             <section className="balances-shell" aria-label="UncCoin balances">
                 <div className="balances-meta">
                     <span className="balances-section-title">Balance Sheet</span>
-                    <p className="total-unc-coins">Total UncCoins: {totalUncCoins}</p>
+                    <p className="total-unc-coins">
+                        <span className="total-unc-coins-label">Total UncCoins:</span>
+                        <SplitFlapTotal value={totalUncCoins} />
+                    </p>
                 </div>
 
                 <div className="balances-submeta">
