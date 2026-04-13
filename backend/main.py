@@ -1,16 +1,20 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 from fastapi import FastAPI
 
 
 PENGER_FILE = Path(__file__).parent / "penger.txt"
+BLOCKCHAIN_FILE = Path(__file__).parent / "blockchain.json"
 REFRESH_SECONDS = 10
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
+blockchain: Dict[str, Any] = {}
+blockchain_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
 
 
@@ -67,9 +71,36 @@ async def load_balances_once() -> None:
         balances.update(parsed)
 
 
+async def load_blockchain_once() -> None:
+    if not BLOCKCHAIN_FILE.exists():
+        return
+
+    try:
+        text = BLOCKCHAIN_FILE.read_text(encoding="utf-8")
+        parsed = json.loads(text)
+    except FileNotFoundError:
+        print(f"Error: {BLOCKCHAIN_FILE} not found.")
+        return
+    except json.JSONDecodeError as error:
+        print(f"Error parsing {BLOCKCHAIN_FILE}: {error}")
+        return
+    except Exception as error:
+        print(f"Error reading {BLOCKCHAIN_FILE}: {error}")
+        return
+
+    if not isinstance(parsed, dict):
+        print(f"Error: {BLOCKCHAIN_FILE} does not contain a JSON object.")
+        return
+
+    async with blockchain_lock:
+        blockchain.clear()
+        blockchain.update(parsed)
+
+
 async def refresh_loop() -> None:
     while True:
         await load_balances_once()
+        await load_blockchain_once()
         await asyncio.sleep(REFRESH_SECONDS)
 
 
@@ -78,6 +109,7 @@ async def lifespan(app: FastAPI):
     global refresh_task
 
     await load_balances_once()  # load immediately on startup
+    await load_blockchain_once()
     refresh_task = asyncio.create_task(refresh_loop())
 
     try:
@@ -98,6 +130,12 @@ app = FastAPI(title="Wallet Balances API", lifespan=lifespan)
 async def get_balances() -> Dict[str, float]:
     async with balances_lock:
         return dict(balances)
+
+
+@app.get("/blockchain")
+async def get_blockchain() -> Dict[str, Any]:
+    async with blockchain_lock:
+        return dict(blockchain)
 
 
 @app.get("/health")

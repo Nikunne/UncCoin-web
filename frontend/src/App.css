@@ -16,6 +16,10 @@
   font-family: "Courier New", Courier, monospace;
 }
 
+.blockchain-page {
+  padding-bottom: 72px;
+}
+
 .masthead {
   width: min(980px, 100%);
   margin: 0 auto 24px;
@@ -24,6 +28,10 @@
   border: 3px double rgba(114, 72, 30, 0.9);
   background: linear-gradient(180deg, rgba(30, 17, 7, 0.92), rgba(59, 34, 15, 0.94));
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+}
+
+.masthead-left {
+  text-align: left;
 }
 
 .masthead-kicker {
@@ -49,11 +57,22 @@
   font-size: 1rem;
 }
 
-.investment-cta {
+.masthead-left .masthead-subtitle {
+  margin-left: 0;
+}
+
+.page-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   justify-content: center;
   width: min(980px, 100%);
   margin: 0 auto 24px;
+}
+
+.investment-cta {
+  display: flex;
+  justify-content: center;
 }
 
 .investment-link {
@@ -68,6 +87,11 @@
   text-decoration: none;
   letter-spacing: 0.08rem;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.investment-button {
+  font: inherit;
+  cursor: pointer;
 }
 
 .investment-link:hover,
@@ -148,7 +172,6 @@
   font-size: 0.82rem;
   text-transform: uppercase;
   text-decoration: none;
-  cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
@@ -165,10 +188,10 @@
 }
 
 .balances-card {
-  background: linear-gradient(180deg, rgba(255, 239, 202, 0.96), rgba(226, 198, 142, 0.94));
+  overflow: hidden;
   border: 2px solid #7e5425;
   border-radius: 6px;
-  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 239, 202, 0.96), rgba(226, 198, 142, 0.94));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
@@ -186,24 +209,216 @@
 }
 
 .balance-user {
-  flex: 1;
   min-width: 0;
+  flex: 1;
   overflow: hidden;
+  color: #4c2d12;
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: 0.06rem;
+  text-transform: uppercase;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 700;
-  font-size: 1.02rem;
-  color: #4c2d12;
-  text-transform: uppercase;
-  letter-spacing: 0.06rem;
 }
 
 .balance-amount {
-  font-weight: 700;
-  font-size: 1.1rem;
   color: #8c2f0e;
+  font-size: 1.1rem;
+  font-weight: 700;
   text-align: right;
   white-space: nowrap;
+}
+
+.chain-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.blockchain-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.blockchain-filter {
+  min-width: 0;
+  flex: 1;
+}
+
+.blockchain-select {
+  width: 100%;
+  min-height: 43px;
+  padding: 10px 18px;
+  border: 1px solid rgba(255, 220, 156, 0.4);
+  background: rgba(20, 10, 4, 0.45);
+  color: #fff0c9;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.investment-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chain-stat-card,
+.chain-wallet-card,
+.block-card {
+  border: 1px solid rgba(255, 220, 156, 0.3);
+  background: rgba(20, 10, 4, 0.38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.chain-stat-card {
+  padding: 14px 16px;
+}
+
+.chain-stat-label,
+.hash-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #f2c978;
+  font-size: 0.74rem;
+  letter-spacing: 0.12rem;
+  text-transform: uppercase;
+}
+
+.chain-stat-value {
+  color: #fff0c9;
+  font-size: 1.6rem;
+}
+
+.chain-wallet-card {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+}
+
+.chain-wallet-value,
+.hash-value {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #ffe9bf;
+  font-size: 0.86rem;
+}
+
+.block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.block-card {
+  padding: 16px;
+}
+
+.block-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.block-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #f7d287;
+  font-size: 0.86rem;
+  text-transform: uppercase;
+}
+
+.block-id,
+.block-description {
+  margin: 0;
+}
+
+.block-id {
+  color: #fff0c9;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.block-description {
+  margin-top: 4px;
+  color: #f0d4a0;
+}
+
+.hash-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.transaction-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.transaction-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr 0.5fr 0.9fr;
+  gap: 12px;
+  padding: 12px;
+  border: 1px dashed rgba(255, 220, 156, 0.18);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.transaction-amount,
+.transaction-time,
+.empty-state {
+  color: #fff0c9;
+}
+
+.blockchain-loading-more {
+  margin: 18px 0 0;
+  color: #f2c978;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.08rem;
+}
+
+.scroll-top-button {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 220, 156, 0.6);
+  background: rgba(20, 10, 4, 0.88);
+  color: #fff0c9;
+  font: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0.96;
+}
+
+.scroll-top-button:hover,
+.scroll-top-button:focus-visible {
+  background: rgba(58, 30, 10, 0.95);
+  border-color: rgba(255, 220, 156, 0.85);
+}
+
+.empty-state {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .chain-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transaction-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 700px) {
@@ -219,22 +434,35 @@
     letter-spacing: 0.2rem;
   }
 
+  .page-actions,
+  .investment-cta {
+    width: 100%;
+  }
+
+  .investment-link {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+
   .balances-shell {
     padding: 12px;
   }
 
-  .balances-meta {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .balances-submeta {
+  .balances-meta,
+  .balances-submeta,
+  .blockchain-toolbar,
+  .block-card-header,
+  .hash-grid,
+  .transaction-row {
+    display: flex;
     flex-direction: column;
     align-items: flex-start;
   }
 
   .total-unc-coins,
-  .last-updated {
+  .last-updated,
+  .balance-amount {
     text-align: left;
   }
 
@@ -244,7 +472,12 @@
     gap: 6px;
   }
 
-  .balance-amount {
-    text-align: left;
+  .chain-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .scroll-top-button {
+    right: 12px;
+    bottom: 12px;
   }
 }
