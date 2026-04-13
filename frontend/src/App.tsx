@@ -122,6 +122,7 @@ function buildYAxisTicks(maxSupply: number): YAxisTick[] {
 function HomePage() {
     const [balances, setBalances] = useState<BalanceRow[]>([]);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [copiedUser, setCopiedUser] = useState<string | null>(null);
     const totalUncCoins = balances.reduce((sum, [, amount]) => sum + amount, 0);
 
     useEffect(() => {
@@ -151,6 +152,18 @@ function HomePage() {
             clearInterval(reloadTimer);
         };
     }, []);
+
+    const copyAddress = async (user: string) => {
+        try {
+            await navigator.clipboard.writeText(user);
+            setCopiedUser(user);
+            window.setTimeout(() => {
+                setCopiedUser((current) => (current === user ? null : current));
+            }, 1500);
+        } catch (error) {
+            console.error(error);
+        }
+    };
 
     return (
         <div className="balances-page">
@@ -215,8 +228,29 @@ function HomePage() {
                 <div className="balances-card">
                     {[...balances].reverse().map(([user, amount]) => (
                         <div key={user} className="balance-row">
-                            <span className="balance-user">{user}</span>
-                            <span className="balance-amount">{amount}</span>
+                            <button
+                                className="balance-user"
+                                type="button"
+                                onClick={() => {
+                                    void copyAddress(user);
+                                }}
+                                title={`Copy ${user}`}
+                            >
+                                {user}
+                            </button>
+                            <div className="balance-row-footer">
+                                <span className="balance-amount">{amount}</span>
+                                <button
+                                    className="balance-copy-button"
+                                    type="button"
+                                    onClick={() => {
+                                        void copyAddress(user);
+                                    }}
+                                    aria-label={`Copy address ${user}`}
+                                >
+                                    {copiedUser === user ? "Copied" : "Copy"}
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>

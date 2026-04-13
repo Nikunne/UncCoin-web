@@ -221,6 +221,12 @@
   min-width: 0;
   flex: 1;
   overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
   color: #4c2d12;
   font-size: 1.02rem;
   font-weight: 700;
@@ -230,12 +236,40 @@
   white-space: nowrap;
 }
 
+.balance-user:focus-visible,
+.balance-copy-button:focus-visible {
+  outline: 2px solid rgba(140, 47, 14, 0.65);
+  outline-offset: 2px;
+}
+
+.balance-row-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 .balance-amount {
   color: #8c2f0e;
   font-size: 1.1rem;
   font-weight: 700;
   text-align: right;
   white-space: nowrap;
+}
+
+.balance-copy-button {
+  display: none;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid rgba(126, 84, 37, 0.55);
+  background: rgba(255, 239, 202, 0.55);
+  color: #6b2b10;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
 }
 
 .chain-stats {
@@ -578,10 +612,23 @@
     letter-spacing: 0.03rem;
   }
 
+  .balance-row-footer {
+    width: 100%;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
   .balance-amount {
     font-size: 1rem;
     overflow-wrap: anywhere;
     word-break: break-word;
+    text-align: left;
+  }
+
+  .balance-copy-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .chain-wallet-value,
