@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 export type BalanceRow = [string, number];
 
@@ -9,5 +9,6 @@ export async function getBalances(): Promise<BalanceRow[]> {
         throw new Error(`Failed to fetch balances: ${response.status}`);
     }
 
-    return response.json();
+    const data = (await response.json()) as Record<string, number>;
+    return Object.entries(data);
 }
