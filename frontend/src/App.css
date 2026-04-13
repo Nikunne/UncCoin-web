@@ -673,9 +673,6 @@
   }
 
   .copy-toast {
-    right: 12px;
-    bottom: 60px;
-    max-width: calc(100vw - 24px);
-    font-size: 0.8rem;
+    display: none;
   }
 }
