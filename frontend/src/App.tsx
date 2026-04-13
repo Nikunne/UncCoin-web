@@ -36,23 +36,48 @@ export default function App() {
 
     return (
         <div className="balances-page">
-            <h1 className="balances-title">₿ Balances</h1>
-            <a href={"https://github.com/Fleli/UncCoin#"}>Github-link for UncCoin</a>
-            <p></p>
+            <header className="masthead">
+                <p className="masthead-kicker">internet money bulletin</p>
+                <h1 className="balances-title">UncCoin</h1>
+                <p className="masthead-subtitle">Old-school ledger vibes for the latest balance board.</p>
+            </header>
 
-            <a href={"https://github.com/Nikunne/UncCoin-web"}>Github-link for UncCoin-web</a>
-            <p className="last-updated">
-                Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "loading..."}
-            </p>
+            <section className="balances-shell" aria-label="UncCoin balances">
+                <div className="balances-meta">
+                    <span className="balances-section-title">Balance Sheet</span>
+                    <p className="last-updated">
+                        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "loading..."}
+                    </p>
+                </div>
 
-            <div className="balances-card">
-                {[...balances].reverse().map(([user, amount]) => (
-                    <div key={user} className="balance-row">
-                        <span className="balance-user">{user}</span>
-                        <span className="balance-amount">{amount}</span>
-                    </div>
-                ))}
-            </div>
+                <div className="repo-notes" aria-label="Project notes">
+                    <a
+                        className="repo-link"
+                        href="https://github.com/Fleli/UncCoin"
+                        target="_blank"
+                        rel="noreferrer"
+                    >
+                        Github-link for UncCoin
+                    </a>
+                    <a
+                        className="repo-link"
+                        href="https://github.com/Nikunne/UncCoin-web"
+                        target="_blank"
+                        rel="noreferrer"
+                    >
+                        Github-link for this repo
+                    </a>
+                </div>
+
+                <div className="balances-card">
+                    {[...balances].reverse().map(([user, amount]) => (
+                        <div key={user} className="balance-row">
+                            <span className="balance-user">{user}</span>
+                            <span className="balance-amount">{amount}</span>
+                        </div>
+                    ))}
+                </div>
+            </section>
         </div>
     );
 }
