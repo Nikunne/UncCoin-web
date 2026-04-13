@@ -42,6 +42,17 @@ export default function App() {
                 <p className="masthead-subtitle">The most genuine cryptocurrency ever*</p>
             </header>
 
+            <div className="investment-cta">
+                <a
+                    className="investment-link"
+                    href="https://en.wikipedia.org/wiki/Exit_scam#Cryptocurrency_scams"
+                    target="_blank"
+                    rel="noreferrer"
+                >
+                    Interested in investing? Click-here!
+                </a>
+            </div>
+
             <section className="balances-shell" aria-label="UncCoin balances">
                 <div className="balances-meta">
                     <span className="balances-section-title">Balance Sheet</span>
