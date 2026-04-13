@@ -124,6 +124,7 @@ function HomePage() {
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [copiedUser, setCopiedUser] = useState<string | null>(null);
     const [copiedToast, setCopiedToast] = useState<string | null>(null);
+    const [isCopyToastVisible, setIsCopyToastVisible] = useState(false);
     const totalUncCoins = balances.reduce((sum, [, amount]) => sum + amount, 0);
 
     useEffect(() => {
@@ -159,12 +160,16 @@ function HomePage() {
             await navigator.clipboard.writeText(user);
             setCopiedUser(user);
             setCopiedToast(user);
+            setIsCopyToastVisible(true);
             window.setTimeout(() => {
                 setCopiedUser((current) => (current === user ? null : current));
-            }, 2000);
+            }, 1800);
+            window.setTimeout(() => {
+                setIsCopyToastVisible(false);
+            }, 1000);
             window.setTimeout(() => {
                 setCopiedToast((current) => (current === user ? null : current));
-            }, 2000);
+            }, 1800);
         } catch (error) {
             console.error(error);
         }
@@ -263,7 +268,11 @@ function HomePage() {
             </section>
 
             {copiedToast ? (
-                <div className="copy-toast" role="status" aria-live="polite">
+                <div
+                    className={`copy-toast ${isCopyToastVisible ? "copy-toast-visible" : "copy-toast-hidden"}`}
+                    role="status"
+                    aria-live="polite"
+                >
                     Copied wallet address: {copiedToast}
                 </div>
             ) : null}
