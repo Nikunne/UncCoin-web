@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 
 PENGER_FILE = Path(__file__).parent / "penger.txt"
-REFRESH_SECONDS = 60
+REFRESH_SECONDS = 10
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
