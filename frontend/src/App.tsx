@@ -218,7 +218,7 @@ function HomePage() {
                     </Link>
                 </div>
                 <div className="investment-cta">
-                    <Link className="investment-link" to="/login">
+                    <Link className="investment-link wallet-login-link" to="/login">
                         Wallet login
                     </Link>
                 </div>
@@ -623,7 +623,7 @@ function StatPage() {
                     </Link>
                 </div>
                 <div className="investment-cta">
-                    <Link className="investment-link" to="/login">
+                    <Link className="investment-link wallet-login-link" to="/login">
                         Wallet login
                     </Link>
                 </div>
@@ -911,7 +911,7 @@ function BlockchainPage() {
                     </Link>
                 </div>
                 <div className="investment-cta">
-                    <Link className="investment-link" to="/login">
+                    <Link className="investment-link wallet-login-link" to="/login">
                         Wallet login
                     </Link>
                 </div>

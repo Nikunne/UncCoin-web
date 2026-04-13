@@ -107,6 +107,21 @@
   color: #fff0c9;
 }
 
+.wallet-login-link {
+  border-color: rgba(255, 211, 120, 0.95);
+  background: linear-gradient(180deg, rgba(126, 63, 18, 0.88), rgba(76, 32, 8, 0.96));
+  color: #fff0c9;
+  box-shadow: 0 0 0 1px rgba(255, 225, 163, 0.14), 0 10px 20px rgba(0, 0, 0, 0.26);
+  transform: translateY(-1px);
+}
+
+.wallet-login-link:hover,
+.wallet-login-link:focus-visible {
+  background: linear-gradient(180deg, rgba(155, 78, 24, 0.94), rgba(96, 41, 10, 0.98));
+  border-color: rgba(255, 225, 163, 1);
+  color: #fff6db;
+}
+
 .investment-link:focus-visible {
   outline: 2px solid rgba(255, 230, 176, 0.75);
   outline-offset: 2px;
