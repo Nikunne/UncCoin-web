@@ -39,7 +39,6 @@
   font-size: clamp(2.9rem, 8vw, 5.4rem);
   line-height: 0.95;
   color: #ffe4a1;
-  text-transform: uppercase;
   text-shadow: 3px 3px 0 #8a4f19, 6px 6px 0 rgba(0, 0, 0, 0.45);
 }
 

@@ -15,6 +15,7 @@ WORKDIR = Path("/home/hus/krypto/UncCoin")
 START_CMD = ["./scripts/run.sh", "riggaagent", "4040"]
 PEER_CMD = "add-peer 100.71.105.5:5000"
 BALANCE_CMD = "txtbalances ./penger.txt"
+BLOCKCHAIN_CMD = "txtblockchain ./blockchain.json"
 INITIAL_WAIT_SECONDS = 20
 LOOP_INTERVAL_SECONDS = 30
 
@@ -65,6 +66,7 @@ def main():
                 sys.exit(proc.returncode or 1)
 
             send_command(proc, BALANCE_CMD)
+            send_command(proc, BLOCKCHAIN_CMD)
             time.sleep(LOOP_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
