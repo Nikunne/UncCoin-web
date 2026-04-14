@@ -278,6 +278,8 @@ type PageScaffoldProps = {
     children: ReactNode;
 };
 
+type PrimaryPage = "balances" | "blockchain" | "stats" | "wallet" | "login";
+
 function TopInvestmentTicker() {
     const tickerItems = Array.from({ length: 12 }, () => INVESTMENT_BANNER_TEXT[0]);
 
@@ -333,6 +335,24 @@ function PageNav({ items }: { items: NavItem[] }) {
             })}
         </nav>
     );
+}
+
+function buildPrimaryNavItems(activePage: PrimaryPage): NavItem[] {
+    const isLoggedIn = Boolean(loadStoredWalletAddress());
+    const walletLabel = isLoggedIn ? "My Wallet" : "Login";
+    const walletTarget = isLoggedIn ? "/wallet" : "/login";
+
+    return [
+        { to: "/", label: "Balances", active: activePage === "balances" },
+        { to: "/blockchain", label: "Blockchain", active: activePage === "blockchain" },
+        { to: "/stat", label: "Stats", active: activePage === "stats" },
+        {
+            to: walletTarget,
+            label: walletLabel,
+            kind: "login",
+            active: activePage === "wallet" || activePage === "login",
+        },
+    ];
 }
 
 function PageScaffold({ children }: PageScaffoldProps) {
@@ -559,14 +579,7 @@ function HomePage() {
 
     return (
         <PageScaffold>
-            <PageNav
-                items={[
-                    { to: "/", label: "Balances", active: true },
-                    { to: "/blockchain", label: "Blockchain" },
-                    { to: "/stat", label: "Stats" },
-                    { to: "/login", label: "Login", kind: "login" },
-                ]}
-            />
+            <PageNav items={buildPrimaryNavItems("balances")} />
             <header className="masthead">
                 <h1 className="balances-title">UncCoin</h1>
                 <p className="masthead-subtitle">The most genuine cryptocurrency ever*</p>
@@ -686,14 +699,7 @@ function LoginPage() {
 
     return (
         <PageScaffold>
-            <PageNav
-                items={[
-                    { to: "/", label: "Balances" },
-                    { to: "/blockchain", label: "Blockchain" },
-                    { to: "/stat", label: "Stats" },
-                    { to: "/login", label: "Login", kind: "login", active: true },
-                ]}
-            />
+            <PageNav items={buildPrimaryNavItems("login")} />
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Wallet Access</p>
                 <h1 className="balances-title">UncCoin Login</h1>
@@ -819,15 +825,7 @@ function WalletDashboardPage() {
 
     return (
         <PageScaffold>
-            <PageNav
-                items={[
-                    { to: "/", label: "Balances" },
-                    { to: "/blockchain", label: "Blockchain" },
-                    { to: "/stat", label: "Stats" },
-                    { to: "/login", label: "Wallet", kind: "login", active: true },
-                    { label: "Log out", onClick: logOut },
-                ]}
-            />
+            <PageNav items={buildPrimaryNavItems("wallet")} />
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Wallet Dashboard</p>
                 <h1 className="balances-title">My UncCoin Wallet</h1>
@@ -845,11 +843,16 @@ function WalletDashboardPage() {
                     </p>
                 </div>
 
-                <div className="chain-wallet-card">
-                    <span className="chain-stat-label">Wallet Address</span>
-                    <code className={getWalletAddressClassName("chain-wallet-value", walletAddress)}>
-                        {walletAddress || "loading..."}
-                    </code>
+                <div className="chain-wallet-card chain-wallet-card-header">
+                    <div className="chain-wallet-card-copy">
+                        <span className="chain-stat-label">Wallet Address</span>
+                        <code className={getWalletAddressClassName("chain-wallet-value", walletAddress)}>
+                            {walletAddress || "loading..."}
+                        </code>
+                    </div>
+                    <button className="wallet-logout-button" type="button" onClick={logOut}>
+                        Log out
+                    </button>
                 </div>
 
                 {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
@@ -1025,14 +1028,7 @@ function StatPage() {
 
     return (
         <PageScaffold>
-            <PageNav
-                items={[
-                    { to: "/", label: "Balances" },
-                    { to: "/blockchain", label: "Blockchain" },
-                    { to: "/stat", label: "Stats", active: true },
-                    { to: "/login", label: "Login", kind: "login" },
-                ]}
-            />
+            <PageNav items={buildPrimaryNavItems("stats")} />
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Stats</p>
                 <h1 className="balances-title">UncCoin Supply</h1>
@@ -1349,14 +1345,7 @@ function BlockchainPage() {
 
     return (
         <PageScaffold>
-            <PageNav
-                items={[
-                    { to: "/", label: "Balances" },
-                    { to: "/blockchain", label: "Blockchain", active: true },
-                    { to: "/stat", label: "Stats" },
-                    { to: "/login", label: "Login", kind: "login" },
-                ]}
-            />
+            <PageNav items={buildPrimaryNavItems("blockchain")} />
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Chain View</p>
                 <h1 className="balances-title">UncCoin Blockchain</h1>
