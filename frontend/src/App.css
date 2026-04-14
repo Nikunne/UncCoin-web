@@ -742,6 +742,46 @@ body::-webkit-scrollbar-thumb {
   padding: 14px 16px;
 }
 
+.chain-wallet-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.chain-wallet-card-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.wallet-logout-button {
+  min-width: 180px;
+  min-height: 52px;
+  padding: 12px 20px;
+  border: 1px solid rgba(255, 185, 140, 0.6);
+  background: linear-gradient(180deg, rgba(111, 34, 12, 0.92), rgba(59, 17, 6, 0.98));
+  color: #fff0d4;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.12rem;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 223, 188, 0.12);
+}
+
+.wallet-logout-button:hover,
+.wallet-logout-button:focus-visible {
+  border-color: rgba(255, 212, 171, 0.9);
+  background: linear-gradient(180deg, rgba(136, 45, 17, 0.96), rgba(74, 20, 8, 1));
+  color: #fff6e2;
+}
+
+.wallet-logout-button:focus-visible {
+  outline: 2px solid rgba(255, 214, 170, 0.7);
+  outline-offset: 2px;
+}
+
 .chain-wallet-value,
 .hash-value {
   display: block;
@@ -1127,6 +1167,16 @@ body::-webkit-scrollbar-thumb {
 
   .wallet-history-header {
     align-items: flex-start;
+  }
+
+  .chain-wallet-card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wallet-logout-button {
+    width: 100%;
+    min-width: 0;
   }
 
   .total-unc-coins,
