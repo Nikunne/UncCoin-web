@@ -1,7 +1,7 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -33,7 +33,7 @@ def parse_amount(value: Any) -> float:
         return 0.0
 
 
-def parse_timestamp(value: Any) -> datetime | None:
+def parse_timestamp(value: Any) -> float | None:
     if not isinstance(value, str) or not value.strip():
         return None
 
@@ -42,9 +42,14 @@ def parse_timestamp(value: Any) -> datetime | None:
         normalized = f"{normalized[:-1]}+00:00"
 
     try:
-        return datetime.fromisoformat(normalized)
+        parsed = datetime.fromisoformat(normalized)
     except ValueError:
         return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+
+    return parsed.timestamp()
 
 
 def collect_wallet_addresses(chain_data: Dict[str, Any]) -> set[str]:
@@ -159,7 +164,7 @@ def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str
 
     activity.sort(
         key=lambda entry: (
-            parse_timestamp(entry.get("timestamp")) or datetime.min,
+            parse_timestamp(entry.get("timestamp")) or float("-inf"),
             entry.get("block_id") if isinstance(entry.get("block_id"), int) else -1,
         ),
         reverse=True,
