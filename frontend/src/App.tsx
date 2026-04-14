@@ -14,6 +14,7 @@ const CHART_PADDING = 64;
 const CHART_TICK_COUNT = 6;
 const CHART_Y_TICK_COUNT = 5;
 const WALLET_SESSION_KEY = "unc-wallet-address";
+const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1";
 const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
 const HEI_FREDERIK_PATTERN = /heifrederik\d*/i;
 
@@ -54,6 +55,10 @@ function formatBlockShare(count: number, total: number): string {
 
     const percentage = ((count / total) * 100).toFixed(1);
     return `${percentage.endsWith(".0") ? percentage.slice(0, -2) : percentage}%`;
+}
+
+function getWalletAddressClassName(baseClassName: string, address: string): string {
+    return address === FEATURED_WALLET_ADDRESS ? `${baseClassName} featured-wallet-address` : baseClassName;
 }
 
 function usePrevious<T>(value: T): T | undefined {
@@ -440,7 +445,7 @@ function HomePage() {
                     {[...balances].reverse().map(([user, amount]) => (
                         <div key={user} className="balance-row">
                             <button
-                                className="balance-user"
+                                className={getWalletAddressClassName("balance-user", user)}
                                 type="button"
                                 onClick={() => {
                                     void copyAddress(user);
@@ -659,7 +664,9 @@ function WalletDashboardPage() {
 
                 <div className="chain-wallet-card">
                     <span className="chain-stat-label">Wallet Address</span>
-                    <code className="chain-wallet-value">{walletAddress || "loading..."}</code>
+                    <code className={getWalletAddressClassName("chain-wallet-value", walletAddress)}>
+                        {walletAddress || "loading..."}
+                    </code>
                 </div>
 
                 {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
@@ -979,11 +986,20 @@ function BlockchainPage() {
     const heiFrederikMinedBlocks = recentMiningWindow.filter((block) =>
         HEI_FREDERIK_PATTERN.test(block.description),
     );
-    const walletMinedBlocks = recentMiningWindow.filter((block) => knownWalletAddresses.has(block.description.trim()));
+    const minedWalletAddresses = recentMiningWindow
+        .map((block) =>
+            block.transactions.find(
+                (transaction) =>
+                    transaction.sender === "SYSTEM" &&
+                    transaction.receiver.trim().length > 0 &&
+                    transaction.receiver !== "SYSTEM" &&
+                    parseAmount(transaction.amount) > 0,
+            )?.receiver,
+        )
+        .filter((address): address is string => Boolean(address));
     const walletMinerDistribution = Object.entries(
-        walletMinedBlocks.reduce<Record<string, number>>((counts, block) => {
-            const minerName = block.description.trim();
-            counts[minerName] = (counts[minerName] ?? 0) + 1;
+        minedWalletAddresses.reduce<Record<string, number>>((counts, address) => {
+            counts[address] = (counts[address] ?? 0) + 1;
             return counts;
         }, {}),
     ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
@@ -1123,11 +1139,17 @@ function BlockchainPage() {
                         <div className="blockchain-distribution-list">
                             {walletMinerDistribution.map(([address, count]) => (
                                 <div key={address} className="blockchain-distribution-row">
-                                    <code className="hash-value blockchain-distribution-address" title={address}>
+                                    <code
+                                        className={getWalletAddressClassName(
+                                            "hash-value blockchain-distribution-address",
+                                            address,
+                                        )}
+                                        title={address}
+                                    >
                                         {address}
                                     </code>
                                     <span className="blockchain-distribution-share">
-                                        {formatBlockShare(count, walletMinedBlocks.length)}
+                                        {formatBlockShare(count, minedWalletAddresses.length)}
                                     </span>
                                 </div>
                             ))}
@@ -1244,13 +1266,25 @@ function BlockchainPage() {
                                         >
                                             <div>
                                                 <span className="hash-label">From</span>
-                                                <code className="hash-value" title={transaction.sender}>
+                                                <code
+                                                    className={getWalletAddressClassName(
+                                                        "hash-value",
+                                                        transaction.sender,
+                                                    )}
+                                                    title={transaction.sender}
+                                                >
                                                     {transaction.sender}
                                                 </code>
                                             </div>
                                             <div>
                                                 <span className="hash-label">To</span>
-                                                <code className="hash-value" title={transaction.receiver}>
+                                                <code
+                                                    className={getWalletAddressClassName(
+                                                        "hash-value",
+                                                        transaction.receiver,
+                                                    )}
+                                                    title={transaction.receiver}
+                                                >
                                                     {transaction.receiver}
                                                 </code>
                                             </div>

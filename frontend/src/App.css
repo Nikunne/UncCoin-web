@@ -648,6 +648,12 @@ body::-webkit-scrollbar-thumb {
   line-height: 1.35;
 }
 
+.featured-wallet-address {
+  text-shadow:
+    0.015em 0 0 currentColor,
+    -0.015em 0 0 currentColor;
+}
+
 .wallet-login-form {
   display: flex;
   flex-direction: column;
