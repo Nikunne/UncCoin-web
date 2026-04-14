@@ -18,6 +18,7 @@ const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f
 const SECONDARY_WALLET_ADDRESS = "fe269f427a5ad619ce480192db583a29a7ce4098b22111d9b7216e2fee6bc964";
 const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
 const HEI_FREDERIK_PATTERN = /heifrederik\d*/i;
+const WINDOWS_PATTERN = /windows/i;
 
 function formatTimestamp(timestamp: string): string {
     const parsed = new Date(timestamp);
@@ -995,6 +996,7 @@ function BlockchainPage() {
     const heiFrederikMinedBlocks = recentMiningWindow.filter((block) =>
         HEI_FREDERIK_PATTERN.test(block.description),
     );
+    const windowsMinedBlocks = recentMiningWindow.filter((block) => WINDOWS_PATTERN.test(block.description));
     const minedWalletAddresses = recentMiningWindow
         .map((block) =>
             block.transactions.find(
@@ -1139,6 +1141,10 @@ function BlockchainPage() {
                     <article className="chain-stat-card">
                         <span className="chain-stat-label">Mined With heiFrederik</span>
                         <strong className="chain-stat-value">{formatBlockShare(heiFrederikMinedBlocks.length, recentMiningWindow.length)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Mined With windows</span>
+                        <strong className="chain-stat-value">{formatBlockShare(windowsMinedBlocks.length, recentMiningWindow.length)}</strong>
                     </article>
                 </div>
 
