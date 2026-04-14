@@ -304,44 +304,73 @@ function TopInvestmentTicker() {
 
 function PageNav({ items }: { items: NavItem[] }) {
     const marqueeItems = [...items, ...items, ...items];
+    const [isMarqueeVisible, setIsMarqueeVisible] = useState(false);
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            const target = event.target;
+
+            if (
+                target instanceof HTMLElement &&
+                (target.tagName === "INPUT" ||
+                    target.tagName === "TEXTAREA" ||
+                    target.tagName === "SELECT" ||
+                    target.isContentEditable)
+            ) {
+                return;
+            }
+
+            if (event.key.toLowerCase() === "u" && !event.repeat) {
+                setIsMarqueeVisible((current) => !current);
+            }
+        };
+
+        window.addEventListener("keydown", onKeyDown);
+
+        return () => {
+            window.removeEventListener("keydown", onKeyDown);
+        };
+    }, []);
 
     return (
         <div className="page-nav-shell">
-            <div className="page-actions-marquee" aria-label="Scrolling navigation shortcuts">
-                <div className="page-actions-marquee-track">
-                    {marqueeItems.map((item, index) => {
-                        const className = [
-                            "site-nav-link",
-                            "page-actions-marquee-link",
-                            item.kind === "login" ? "site-nav-link-login" : "",
-                            item.active ? "site-nav-link-active" : "",
-                        ]
-                            .filter(Boolean)
-                            .join(" ");
+            {isMarqueeVisible ? (
+                <div className="page-actions-marquee" aria-label="Scrolling navigation shortcuts">
+                    <div className="page-actions-marquee-track">
+                        {marqueeItems.map((item, index) => {
+                            const className = [
+                                "site-nav-link",
+                                "page-actions-marquee-link",
+                                item.kind === "login" ? "site-nav-link-login" : "",
+                                item.active ? "site-nav-link-active" : "",
+                            ]
+                                .filter(Boolean)
+                                .join(" ");
 
-                        return item.to ? (
-                            <Link
-                                key={`${item.label}-${item.to ?? "button"}-${index}`}
-                                className={className}
-                                to={item.to}
-                                aria-current={item.active ? "page" : undefined}
-                            >
-                                {item.label}
-                            </Link>
-                        ) : (
-                            <button
-                                key={`${item.label}-${item.to ?? "button"}-${index}`}
-                                className={`${className} investment-button`}
-                                type="button"
-                                onClick={item.onClick}
-                                disabled={item.disabled}
-                            >
-                                {item.label}
-                            </button>
-                        );
-                    })}
+                            return item.to ? (
+                                <Link
+                                    key={`${item.label}-${item.to ?? "button"}-${index}`}
+                                    className={className}
+                                    to={item.to}
+                                    aria-current={item.active ? "page" : undefined}
+                                >
+                                    {item.label}
+                                </Link>
+                            ) : (
+                                <button
+                                    key={`${item.label}-${item.to ?? "button"}-${index}`}
+                                    className={`${className} investment-button`}
+                                    type="button"
+                                    onClick={item.onClick}
+                                    disabled={item.disabled}
+                                >
+                                    {item.label}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
-            </div>
+            ) : null}
             <nav className="page-actions" aria-label="Primary">
                 {items.map((item) => {
                     const className = [
