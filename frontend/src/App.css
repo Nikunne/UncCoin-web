@@ -6,7 +6,7 @@
 
 .balances-page {
   min-height: 100vh;
-  padding: 40px 20px 56px;
+  padding: 22px 20px 56px;
   box-sizing: border-box;
   background:
     radial-gradient(circle at top, rgba(255, 214, 120, 0.15), transparent 36%),
@@ -22,8 +22,76 @@
   font-family: "Courier New", Courier, monospace;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .blockchain-page {
   padding-bottom: 72px;
+}
+
+.breaking-investment-banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(980px, 100%);
+  margin: 0 auto 18px;
+  padding: 10px 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 223, 157, 0.38);
+  background: linear-gradient(90deg, rgba(121, 17, 8, 0.95), rgba(54, 17, 6, 0.98));
+  color: #fff1cc;
+  text-decoration: none;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.24);
+}
+
+.breaking-investment-badge {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  background: #f7d287;
+  color: #4a1807;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12rem;
+  text-transform: uppercase;
+}
+
+.breaking-investment-track {
+  display: flex;
+  min-width: max-content;
+  gap: 28px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.08rem;
+  text-transform: uppercase;
+  animation: investment-ticker 22s linear infinite;
+}
+
+.breaking-investment-item::after {
+  content: "//";
+  margin-left: 28px;
+  color: rgba(255, 230, 176, 0.58);
+}
+
+@keyframes investment-ticker {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
 }
 
 .masthead {
@@ -76,23 +144,31 @@
   margin: 0 auto 24px;
 }
 
-.investment-cta {
+.site-nav-item {
   display: flex;
   justify-content: center;
 }
 
+.site-nav-link,
 .investment-link {
   display: inline-block;
-  padding: 10px 18px;
+  min-height: 42px;
+  padding: 10px 16px;
   border: 1px solid rgba(255, 220, 156, 0.4);
-  background: rgba(20, 10, 4, 0.4);
+  background: linear-gradient(180deg, rgba(44, 25, 10, 0.72), rgba(20, 10, 4, 0.88));
   color: #ffe6ab;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 700;
   text-transform: uppercase;
   text-decoration: none;
-  letter-spacing: 0.08rem;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  letter-spacing: 0.1rem;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+  box-shadow: inset 0 1px 0 rgba(255, 241, 208, 0.08);
 }
 
 .investment-button {
@@ -100,28 +176,41 @@
   cursor: pointer;
 }
 
+.site-nav-link:hover,
+.site-nav-link:focus-visible,
 .investment-link:hover,
 .investment-link:focus-visible {
   background: rgba(58, 30, 10, 0.7);
   border-color: rgba(255, 220, 156, 0.75);
   color: #fff0c9;
-}
-
-.wallet-login-link {
-  border-color: rgba(255, 211, 120, 0.95);
-  background: linear-gradient(180deg, rgba(126, 63, 18, 0.88), rgba(76, 32, 8, 0.96));
-  color: #fff0c9;
-  box-shadow: 0 0 0 1px rgba(255, 225, 163, 0.14), 0 10px 20px rgba(0, 0, 0, 0.26);
   transform: translateY(-1px);
 }
 
-.wallet-login-link:hover,
-.wallet-login-link:focus-visible {
-  background: linear-gradient(180deg, rgba(155, 78, 24, 0.94), rgba(96, 41, 10, 0.98));
-  border-color: rgba(255, 225, 163, 1);
-  color: #fff6db;
+.site-nav-link-active {
+  border-color: rgba(255, 221, 151, 0.88);
+  background: linear-gradient(180deg, rgba(91, 53, 20, 0.9), rgba(38, 20, 7, 0.96));
+  color: #fff3cc;
+  box-shadow: 0 0 0 1px rgba(255, 225, 163, 0.1), 0 10px 20px rgba(0, 0, 0, 0.18);
 }
 
+.site-nav-link-login,
+.wallet-login-link {
+  border-color: rgba(255, 214, 120, 0.55);
+  background: linear-gradient(180deg, rgba(76, 41, 14, 0.86), rgba(33, 17, 6, 0.94));
+  color: #ffe9b3;
+  box-shadow: 0 0 0 1px rgba(255, 220, 156, 0.08);
+}
+
+.site-nav-link-login:hover,
+.site-nav-link-login:focus-visible,
+.wallet-login-link:hover,
+.wallet-login-link:focus-visible {
+  border-color: rgba(255, 225, 163, 0.9);
+  background: linear-gradient(180deg, rgba(100, 54, 18, 0.92), rgba(45, 22, 8, 0.98));
+  color: #fff2cf;
+}
+
+.site-nav-link:focus-visible,
 .investment-link:focus-visible {
   outline: 2px solid rgba(255, 230, 176, 0.75);
   outline-offset: 2px;
@@ -429,7 +518,7 @@
   align-items: end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .blockchain-filter {
@@ -440,12 +529,41 @@
 .blockchain-select {
   width: 100%;
   min-height: 43px;
-  padding: 10px 18px;
+  padding: 10px 14px;
   border: 1px solid rgba(255, 220, 156, 0.4);
   background: rgba(20, 10, 4, 0.45);
   color: #fff0c9;
   font: inherit;
   box-sizing: border-box;
+}
+
+.blockchain-view-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding: 4px;
+  border: 1px solid rgba(255, 220, 156, 0.24);
+  background: rgba(20, 10, 4, 0.3);
+}
+
+.blockchain-view-button {
+  min-width: 84px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: #f0d4a0;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08rem;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.blockchain-view-button-active {
+  background: linear-gradient(180deg, rgba(255, 218, 141, 0.9), rgba(207, 148, 65, 0.92));
+  color: #4c2409;
 }
 
 .investment-button:disabled {
@@ -562,6 +680,10 @@
   padding: 16px;
 }
 
+.block-card-compact {
+  padding: 12px 14px;
+}
+
 .block-card-header {
   display: flex;
   justify-content: space-between;
@@ -602,6 +724,11 @@
   margin-bottom: 14px;
 }
 
+.hash-grid-compact {
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
 .transaction-list {
   display: flex;
   flex-direction: column;
@@ -615,6 +742,34 @@
   padding: 12px;
   border: 1px dashed rgba(255, 220, 156, 0.18);
   background: rgba(255, 255, 255, 0.03);
+}
+
+.transaction-row-compact {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) auto auto;
+  gap: 8px 12px;
+  padding: 8px 10px;
+}
+
+.block-card-compact .block-card-header {
+  margin-bottom: 8px;
+}
+
+.block-card-compact .block-description {
+  margin-top: 2px;
+  font-size: 0.88rem;
+}
+
+.block-card-compact .hash-label,
+.block-card-compact .chain-stat-label {
+  margin-bottom: 4px;
+  font-size: 0.67rem;
+  letter-spacing: 0.1rem;
+}
+
+.block-card-compact .hash-value,
+.block-card-compact .transaction-amount,
+.block-card-compact .transaction-time {
+  font-size: 0.78rem;
 }
 
 .transaction-amount,
@@ -763,6 +918,21 @@
     padding: 24px 12px 40px;
   }
 
+  .breaking-investment-banner {
+    gap: 10px;
+    padding: 9px 10px;
+  }
+
+  .breaking-investment-badge {
+    padding: 5px 8px;
+    font-size: 0.68rem;
+  }
+
+  .breaking-investment-track {
+    gap: 20px;
+    font-size: 0.76rem;
+  }
+
   .masthead {
     padding: 16px 14px 18px;
   }
@@ -781,10 +951,11 @@
   }
 
   .page-actions,
-  .investment-cta {
+  .site-nav-item {
     width: 100%;
   }
 
+  .site-nav-link,
   .investment-link {
     width: 100%;
     box-sizing: border-box;
@@ -874,6 +1045,15 @@
 
   .chain-stats {
     grid-template-columns: 1fr;
+  }
+
+  .blockchain-view-switch {
+    display: flex;
+    width: 100%;
+  }
+
+  .blockchain-view-button {
+    flex: 1;
   }
 
   .scroll-top-button {

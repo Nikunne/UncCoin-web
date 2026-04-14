@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
 import { getBlockchain, type BlockchainBlock, type BlockchainResponse } from "./api/blockchain";
@@ -13,6 +13,12 @@ const CHART_PADDING = 64;
 const CHART_TICK_COUNT = 6;
 const CHART_Y_TICK_COUNT = 5;
 const WALLET_SESSION_KEY = "unc-wallet-address";
+const INVESTMENT_BANNER_TEXT = [
+    "AKKURAT NAA",
+    "INVESTER I UNC-COIN",
+    "100% ULTRA SERIOS WEB3-EIENDOM*",
+    "KLIKK FOR PROSPEKT",
+];
 
 function formatTimestamp(timestamp: string): string {
     const parsed = new Date(timestamp);
@@ -42,6 +48,20 @@ function formatWalletAmount(value: number): string {
 
 function formatTotalAmount(value: number): string {
     return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0";
+}
+
+function isToday(timestamp: string): boolean {
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) {
+        return false;
+    }
+
+    const now = new Date();
+    return (
+        parsed.getFullYear() === now.getFullYear() &&
+        parsed.getMonth() === now.getMonth() &&
+        parsed.getDate() === now.getDate()
+    );
 }
 
 function usePrevious<T>(value: T): T | undefined {
@@ -136,6 +156,88 @@ type YAxisTick = {
     value: number;
     y: number;
 };
+
+type NavItem = {
+    to?: string;
+    label: string;
+    kind?: "default" | "login";
+    active?: boolean;
+    onClick?: () => void;
+    disabled?: boolean;
+};
+
+type PageScaffoldProps = {
+    children: ReactNode;
+};
+
+function TopInvestmentTicker() {
+    const tickerItems = [...INVESTMENT_BANNER_TEXT, ...INVESTMENT_BANNER_TEXT];
+
+    return (
+        <a
+            className="breaking-investment-banner"
+            href="https://en.wikipedia.org/wiki/Exit_scam#Cryptocurrency_scams"
+            target="_blank"
+            rel="noreferrer"
+        >
+            <span className="breaking-investment-badge">Akkurat naa</span>
+            <span className="breaking-investment-track" aria-hidden="true">
+                {tickerItems.map((item, index) => (
+                    <span key={`${item}-${index}`} className="breaking-investment-item">
+                        {item}
+                    </span>
+                ))}
+            </span>
+            <span className="sr-only">
+                Akkurat naa: Invester i UncCoin. Klikk for prospekt.
+            </span>
+        </a>
+    );
+}
+
+function PageNav({ items }: { items: NavItem[] }) {
+    return (
+        <nav className="page-actions" aria-label="Primary">
+            {items.map((item) => {
+                const className = [
+                    "site-nav-link",
+                    item.kind === "login" ? "site-nav-link-login" : "",
+                    item.active ? "site-nav-link-active" : "",
+                ]
+                    .filter(Boolean)
+                    .join(" ");
+
+                return (
+                    <div key={`${item.label}-${item.to ?? "button"}`} className="site-nav-item">
+                        {item.to ? (
+                            <Link className={className} to={item.to} aria-current={item.active ? "page" : undefined}>
+                                {item.label}
+                            </Link>
+                        ) : (
+                            <button
+                                className={`${className} investment-button`}
+                                type="button"
+                                onClick={item.onClick}
+                                disabled={item.disabled}
+                            >
+                                {item.label}
+                            </button>
+                        )}
+                    </div>
+                );
+            })}
+        </nav>
+    );
+}
+
+function PageScaffold({ children }: PageScaffoldProps) {
+    return (
+        <div className="balances-page">
+            <TopInvestmentTicker />
+            {children}
+        </div>
+    );
+}
 
 type SplitFlapCellProps = {
     currentChar: string;
@@ -276,39 +378,20 @@ function HomePage() {
     };
 
     return (
-        <div className="balances-page">
+        <PageScaffold>
             <header className="masthead">
                 <h1 className="balances-title">UncCoin</h1>
                 <p className="masthead-subtitle">The most genuine cryptocurrency ever*</p>
             </header>
 
-            <div className="page-actions">
-                <div className="investment-cta">
-                    <a
-                        className="investment-link"
-                        href="https://en.wikipedia.org/wiki/Exit_scam#Cryptocurrency_scams"
-                        target="_blank"
-                        rel="noreferrer"
-                    >
-                        Interested in investing? Click-here!
-                    </a>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/blockchain">
-                        View blockchain
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/stat">
-                        View stats
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link wallet-login-link" to="/login">
-                        Wallet login
-                    </Link>
-                </div>
-            </div>
+            <PageNav
+                items={[
+                    { to: "/", label: "Balances", active: true },
+                    { to: "/blockchain", label: "Blockchain" },
+                    { to: "/stat", label: "Stats" },
+                    { to: "/login", label: "Login", kind: "login" },
+                ]}
+            />
 
             <section className="balances-shell" aria-label="UncCoin balances">
                 <div className="balances-meta">
@@ -384,7 +467,7 @@ function HomePage() {
                     Copied wallet address: {copiedToast}
                 </div>
             ) : null}
-        </div>
+        </PageScaffold>
     );
 }
 
@@ -419,7 +502,7 @@ function LoginPage() {
     };
 
     return (
-        <div className="balances-page">
+        <PageScaffold>
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Wallet Access</p>
                 <h1 className="balances-title">UncCoin Login</h1>
@@ -428,18 +511,14 @@ function LoginPage() {
                 </p>
             </header>
 
-            <div className="page-actions">
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/">
-                        Back to balances
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/blockchain">
-                        View blockchain
-                    </Link>
-                </div>
-            </div>
+            <PageNav
+                items={[
+                    { to: "/", label: "Balances" },
+                    { to: "/blockchain", label: "Blockchain" },
+                    { to: "/stat", label: "Stats" },
+                    { to: "/login", label: "Login", kind: "login", active: true },
+                ]}
+            />
 
             <section className="balances-shell login-shell" aria-label="Wallet login">
                 <form className="wallet-login-form" onSubmit={onSubmit}>
@@ -475,7 +554,7 @@ function LoginPage() {
                     {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
                 </form>
             </section>
-        </div>
+        </PageScaffold>
     );
 }
 
@@ -541,7 +620,7 @@ function WalletDashboardPage() {
     };
 
     return (
-        <div className="balances-page">
+        <PageScaffold>
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Wallet Dashboard</p>
                 <h1 className="balances-title">My UncCoin Wallet</h1>
@@ -550,23 +629,15 @@ function WalletDashboardPage() {
                 </p>
             </header>
 
-            <div className="page-actions">
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/">
-                        Back to balances
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/blockchain">
-                        View blockchain
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <button className="investment-link investment-button" type="button" onClick={logOut}>
-                        Log out
-                    </button>
-                </div>
-            </div>
+            <PageNav
+                items={[
+                    { to: "/", label: "Balances" },
+                    { to: "/blockchain", label: "Blockchain" },
+                    { to: "/stat", label: "Stats" },
+                    { to: "/login", label: "Wallet", kind: "login", active: true },
+                    { label: "Log out", onClick: logOut },
+                ]}
+            />
 
             <section className="balances-shell" aria-label="Logged in wallet">
                 <div className="balances-meta">
@@ -631,7 +702,7 @@ function WalletDashboardPage() {
                     </p>
                 </article>
             </section>
-        </div>
+        </PageScaffold>
     );
 }
 
@@ -691,7 +762,7 @@ function StatPage() {
     const yAxisTicks = buildYAxisTicks(maxSupply);
 
     return (
-        <div className="balances-page">
+        <PageScaffold>
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Stats</p>
                 <h1 className="balances-title">UncCoin Supply</h1>
@@ -700,23 +771,14 @@ function StatPage() {
                 </p>
             </header>
 
-            <div className="page-actions">
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/">
-                        Back to balances
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/blockchain">
-                        View blockchain
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link wallet-login-link" to="/login">
-                        Wallet login
-                    </Link>
-                </div>
-            </div>
+            <PageNav
+                items={[
+                    { to: "/", label: "Balances" },
+                    { to: "/blockchain", label: "Blockchain" },
+                    { to: "/stat", label: "Stats", active: true },
+                    { to: "/login", label: "Login", kind: "login" },
+                ]}
+            />
 
             <section className="balances-shell" aria-label="UncCoin supply statistics">
                 <div className="balances-meta">
@@ -848,7 +910,7 @@ function StatPage() {
                     )}
                 </div>
             </section>
-        </div>
+        </PageScaffold>
     );
 }
 
@@ -857,6 +919,7 @@ function BlockchainPage() {
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [visibleBlocks, setVisibleBlocks] = useState(INITIAL_BLOCKS_VISIBLE);
     const [selectedAddress, setSelectedAddress] = useState("");
+    const [viewMode, setViewMode] = useState<"compact" | "today">("compact");
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [scrollToBottomRequested, setScrollToBottomRequested] = useState(false);
 
@@ -900,10 +963,18 @@ function BlockchainPage() {
               ),
           )
         : blocks;
-    const sortedBlocks = [...filteredBlocks].reverse();
+    const todayBlocks = filteredBlocks
+        .map((block) => ({
+            ...block,
+            transactions: block.transactions.filter((transaction) => isToday(transaction.timestamp)),
+        }))
+        .filter((block) => block.transactions.length > 0);
+    const blocksForView = viewMode === "today" ? todayBlocks : filteredBlocks;
+    const sortedBlocks = [...blocksForView].reverse();
     const recentBlocks = sortedBlocks.slice(0, visibleBlocks);
-    const latestBlock = filteredBlocks.at(-1);
+    const latestBlock = blocksForView.at(-1);
     const pendingTransactions = blockchain?.pending_transactions?.length ?? 0;
+    const todaysTransactions = todayBlocks.reduce((sum, block) => sum + block.transactions.length, 0);
 
     useEffect(() => {
         setVisibleBlocks((current) => {
@@ -979,37 +1050,24 @@ function BlockchainPage() {
     };
 
     return (
-        <div className="balances-page blockchain-page">
+        <PageScaffold>
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Chain View</p>
                 <h1 className="balances-title">UncCoin Blockchain</h1>
                 <p className="masthead-subtitle">
-                    Current chain state, recent blocks, and transaction details from the live blockchain file.
+                    Current chain state in a tighter layout, with a quick switch to today&apos;s on-chain activity.
                 </p>
             </header>
 
-            <div className="page-actions">
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/">
-                        Back to balances
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link" to="/stat">
-                        View stats
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <Link className="investment-link wallet-login-link" to="/login">
-                        Wallet login
-                    </Link>
-                </div>
-                <div className="investment-cta">
-                    <button className="investment-link investment-button" type="button" onClick={scrollToBottom}>
-                        Scroll to bottom
-                    </button>
-                </div>
-            </div>
+            <PageNav
+                items={[
+                    { to: "/", label: "Balances" },
+                    { to: "/blockchain", label: "Blockchain", active: true },
+                    { to: "/stat", label: "Stats" },
+                    { to: "/login", label: "Login", kind: "login" },
+                    { label: "Bottom", onClick: scrollToBottom },
+                ]}
+            />
 
             <section className="balances-shell" aria-label="UncCoin blockchain overview">
                 <div className="balances-meta">
@@ -1039,7 +1097,7 @@ function BlockchainPage() {
                         </select>
                     </label>
                     <button
-                        className="investment-link investment-button"
+                        className="site-nav-link investment-button"
                         type="button"
                         onClick={() => {
                             setSelectedAddress("");
@@ -1051,10 +1109,37 @@ function BlockchainPage() {
                     </button>
                 </div>
 
+                <div className="blockchain-view-switch" role="tablist" aria-label="Blockchain view mode">
+                    <button
+                        className={`blockchain-view-button ${viewMode === "compact" ? "blockchain-view-button-active" : ""}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode === "compact"}
+                        onClick={() => {
+                            setViewMode("compact");
+                            setScrollToBottomRequested(false);
+                        }}
+                    >
+                        Compact
+                    </button>
+                    <button
+                        className={`blockchain-view-button ${viewMode === "today" ? "blockchain-view-button-active" : ""}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={viewMode === "today"}
+                        onClick={() => {
+                            setViewMode("today");
+                            setScrollToBottomRequested(false);
+                        }}
+                    >
+                        Today
+                    </button>
+                </div>
+
                 <div className="chain-stats">
                     <article className="chain-stat-card">
                         <span className="chain-stat-label">Blocks</span>
-                        <strong className="chain-stat-value">{filteredBlocks.length}</strong>
+                        <strong className="chain-stat-value">{blocksForView.length}</strong>
                     </article>
                     <article className="chain-stat-card">
                         <span className="chain-stat-label">Latest Block</span>
@@ -1065,8 +1150,10 @@ function BlockchainPage() {
                         <strong className="chain-stat-value">{blockchain?.difficulty_bits ?? "-"}</strong>
                     </article>
                     <article className="chain-stat-card">
-                        <span className="chain-stat-label">Pending Tx</span>
-                        <strong className="chain-stat-value">{pendingTransactions}</strong>
+                        <span className="chain-stat-label">{viewMode === "today" ? "Today Tx" : "Pending Tx"}</span>
+                        <strong className="chain-stat-value">
+                            {viewMode === "today" ? todaysTransactions : pendingTransactions}
+                        </strong>
                     </article>
                 </div>
 
@@ -1077,7 +1164,10 @@ function BlockchainPage() {
 
                 <div className="block-list">
                     {recentBlocks.map((block) => (
-                        <article key={block.block_id} className="block-card">
+                        <article
+                            key={`${viewMode}-${block.block_id}`}
+                            className={`block-card ${viewMode === "compact" ? "block-card-compact" : ""}`}
+                        >
                             <div className="block-card-header">
                                 <div>
                                     <p className="block-id">Block #{block.block_id}</p>
@@ -1089,7 +1179,7 @@ function BlockchainPage() {
                                 </div>
                             </div>
 
-                            <div className="hash-grid">
+                            <div className={`hash-grid ${viewMode === "compact" ? "hash-grid-compact" : ""}`}>
                                 <div>
                                     <span className="hash-label">Hash</span>
                                     <code className="hash-value" title={block.block_hash}>
@@ -1111,7 +1201,7 @@ function BlockchainPage() {
                                     block.transactions.map((transaction, index) => (
                                         <div
                                             key={`${block.block_id}-${transaction.timestamp}-${index}`}
-                                            className="transaction-row"
+                                            className={`transaction-row ${viewMode === "compact" ? "transaction-row-compact" : ""}`}
                                         >
                                             <div>
                                                 <span className="hash-label">From</span>
@@ -1127,7 +1217,12 @@ function BlockchainPage() {
                                             </div>
                                             <div>
                                                 <span className="hash-label">Amount</span>
-                                                <span className="transaction-amount">{transaction.amount}</span>
+                                                <span className="transaction-amount">
+                                                    {transaction.amount}
+                                                    {viewMode === "compact" && transaction.fee !== "0"
+                                                        ? ` (+${transaction.fee} fee)`
+                                                        : ""}
+                                                </span>
                                             </div>
                                             <div>
                                                 <span className="hash-label">Timestamp</span>
@@ -1143,6 +1238,14 @@ function BlockchainPage() {
                     ))}
                 </div>
 
+                {sortedBlocks.length === 0 ? (
+                    <p className="empty-state">
+                        {viewMode === "today"
+                            ? "No blockchain transactions were recorded today."
+                            : "No blocks match the current filter."}
+                    </p>
+                ) : null}
+
                 {visibleBlocks < sortedBlocks.length ? (
                     <p className="blockchain-loading-more">Scroll down to load more blocks...</p>
                 ) : null}
@@ -1153,7 +1256,7 @@ function BlockchainPage() {
                     Top
                 </button>
             ) : null}
-        </div>
+        </PageScaffold>
     );
 }
 
