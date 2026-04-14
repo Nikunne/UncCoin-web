@@ -525,26 +525,45 @@ body::-webkit-scrollbar-thumb {
 }
 
 .blockchain-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .blockchain-filter {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  flex: 1;
+}
+
+.blockchain-filter-label {
+  flex-shrink: 0;
+  color: #f2c978;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1rem;
+  text-transform: uppercase;
 }
 
 .blockchain-select {
   width: 100%;
-  min-height: 43px;
-  padding: 10px 14px;
+  min-height: 42px;
+  padding: 10px 12px;
   border: 1px solid rgba(255, 220, 156, 0.4);
-  background: rgba(20, 10, 4, 0.45);
+  appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, rgba(255, 230, 176, 0.78) 50%) calc(100% - 18px) calc(50% - 2px) / 7px
+      7px no-repeat,
+    linear-gradient(135deg, rgba(255, 230, 176, 0.78) 50%, transparent 50%) calc(100% - 12px) calc(50% - 2px) / 7px
+      7px no-repeat,
+    rgba(20, 10, 4, 0.55);
   color: #fff0c9;
   font: inherit;
+  font-size: 0.86rem;
   box-sizing: border-box;
 }
 
@@ -1063,6 +1082,17 @@ body::-webkit-scrollbar-thumb {
 
   .chain-stats {
     grid-template-columns: 1fr;
+  }
+
+  .blockchain-filter {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .blockchain-filter-label {
+    font-size: 0.68rem;
   }
 
   .scroll-top-button {

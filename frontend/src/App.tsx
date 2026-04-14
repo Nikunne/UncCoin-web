@@ -1051,9 +1051,10 @@ function BlockchainPage() {
                 </div>
 
                 <div className="blockchain-toolbar">
-                    <label className="blockchain-filter">
-                        <span className="chain-stat-label">Filter by address</span>
+                    <label className="blockchain-filter" htmlFor="blockchain-address-filter">
+                        <span className="blockchain-filter-label">Address filter</span>
                         <select
+                            id="blockchain-address-filter"
                             className="blockchain-select"
                             value={selectedAddress}
                             onChange={(event) => {
