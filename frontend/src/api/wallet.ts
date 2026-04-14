@@ -30,6 +30,56 @@ type WalletLoginResponse = {
     wallet: WalletSummary;
 };
 
+function asNumber(value: unknown): number {
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function asString(value: unknown): string | null {
+    return typeof value === "string" ? value : null;
+}
+
+function normalizeWalletActivity(value: unknown): WalletActivityItem[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value.map((entry) => {
+        const item = entry as Partial<WalletActivityItem>;
+
+        return {
+            block_id: typeof item.block_id === "number" ? item.block_id : null,
+            kind:
+                item.kind === "sent" || item.kind === "received" || item.kind === "mined"
+                    ? item.kind
+                    : "received",
+            sender: typeof item.sender === "string" ? item.sender : "",
+            receiver: typeof item.receiver === "string" ? item.receiver : "",
+            amount: asNumber(item.amount),
+            fee: asNumber(item.fee),
+            timestamp: asString(item.timestamp),
+        };
+    });
+}
+
+function normalizeWalletSummary(value: unknown): WalletSummary {
+    const wallet = (value ?? {}) as Partial<WalletSummary>;
+
+    return {
+        wallet_address: typeof wallet.wallet_address === "string" ? wallet.wallet_address : "",
+        balance: asNumber(wallet.balance),
+        transaction_count: asNumber(wallet.transaction_count),
+        sent_count: asNumber(wallet.sent_count),
+        received_count: asNumber(wallet.received_count),
+        total_sent: asNumber(wallet.total_sent),
+        total_received: asNumber(wallet.total_received),
+        total_fees_paid: asNumber(wallet.total_fees_paid),
+        mined_block_count: asNumber(wallet.mined_block_count),
+        block_appearance_count: asNumber(wallet.block_appearance_count),
+        latest_activity: asString(wallet.latest_activity),
+        activity: normalizeWalletActivity(wallet.activity),
+    };
+}
+
 export async function loginWithWallet(walletAddress: string, password: string): Promise<WalletSummary> {
     const response = await fetch(`${API_BASE_URL}/wallet-login`, {
         method: "POST",
@@ -48,7 +98,7 @@ export async function loginWithWallet(walletAddress: string, password: string): 
     }
 
     const data = (await response.json()) as WalletLoginResponse;
-    return data.wallet;
+    return normalizeWalletSummary(data.wallet);
 }
 
 export async function getWalletSummary(walletAddress: string): Promise<WalletSummary> {
@@ -59,5 +109,5 @@ export async function getWalletSummary(walletAddress: string): Promise<WalletSum
         throw new Error(data?.detail ?? `Failed to fetch wallet: ${response.status}`);
     }
 
-    return (await response.json()) as WalletSummary;
+    return normalizeWalletSummary(await response.json());
 }
