@@ -1,5 +1,15 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
+export type WalletActivityItem = {
+    block_id: number | null;
+    kind: "sent" | "received" | "mined";
+    sender: string;
+    receiver: string;
+    amount: number;
+    fee: number;
+    timestamp: string | null;
+};
+
 export type WalletSummary = {
     wallet_address: string;
     balance: number;
@@ -12,6 +22,7 @@ export type WalletSummary = {
     mined_block_count: number;
     block_appearance_count: number;
     latest_activity: string | null;
+    activity: WalletActivityItem[];
 };
 
 type WalletLoginResponse = {

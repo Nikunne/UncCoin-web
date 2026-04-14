@@ -699,6 +699,33 @@ body::-webkit-scrollbar-thumb {
   margin-top: 18px;
 }
 
+.wallet-history-card {
+  margin-top: 18px;
+}
+
+.wallet-history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.wallet-history-count {
+  color: #f0d4a0;
+  font-size: 0.84rem;
+  letter-spacing: 0.08rem;
+  text-transform: uppercase;
+}
+
+.wallet-history-list {
+  gap: 12px;
+}
+
+.wallet-history-row {
+  grid-template-columns: minmax(0, 2fr) auto auto minmax(0, 1.3fr);
+}
+
 .wallet-activity-value {
   display: block;
   color: #fff0c9;
@@ -1080,6 +1107,10 @@ body::-webkit-scrollbar-thumb {
   .transaction-row {
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .wallet-history-header {
     align-items: flex-start;
   }
 

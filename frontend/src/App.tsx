@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
 import { getBlockchain, type BlockchainBlock, type BlockchainResponse } from "./api/blockchain";
-import { getWalletSummary, loginWithWallet, type WalletSummary } from "./api/wallet";
+import { getWalletSummary, loginWithWallet, type WalletActivityItem, type WalletSummary } from "./api/wallet";
 import "./App.css";
 
 const INITIAL_BLOCKS_VISIBLE = 25;
@@ -48,6 +48,23 @@ function formatWalletAmount(value: number): string {
 
 function formatTotalAmount(value: number): string {
     return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0";
+}
+
+function formatActivityAmount(activity: WalletActivityItem): string {
+    const prefix = activity.kind === "sent" ? "-" : "+";
+    return `${prefix}${formatWalletAmount(activity.amount)} UNC`;
+}
+
+function getActivityTitle(activity: WalletActivityItem): string {
+    if (activity.kind === "mined") {
+        return "Mined block reward";
+    }
+
+    if (activity.kind === "sent") {
+        return "Sent transaction";
+    }
+
+    return "Received transaction";
 }
 
 function formatBlockShare(count: number, total: number): string {
@@ -714,8 +731,8 @@ function WalletDashboardPage() {
                         <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_fees_paid ?? 0)}</strong>
                     </article>
                     <article className="chain-stat-card">
-                        <span className="chain-stat-label">Active Blocks</span>
-                        <strong className="chain-stat-value">{wallet?.block_appearance_count ?? 0}</strong>
+                        <span className="chain-stat-label">Mined Blocks</span>
+                        <strong className="chain-stat-value">{wallet?.mined_block_count ?? 0}</strong>
                     </article>
                 </div>
 
@@ -725,8 +742,61 @@ function WalletDashboardPage() {
                         {wallet?.latest_activity ? formatTimestamp(wallet.latest_activity) : "No on-chain activity yet"}
                     </strong>
                     <p className="wallet-activity-meta">
-                        Mined blocks: {wallet?.mined_block_count ?? 0}
+                        Showing every wallet transaction as a time-sorted ledger entry instead of full block cards.
                     </p>
+                </article>
+
+                <article className="chain-wallet-card wallet-history-card">
+                    <div className="wallet-history-header">
+                        <span className="chain-stat-label">Transaction History</span>
+                        <span className="wallet-history-count">{wallet?.activity.length ?? 0} entries</span>
+                    </div>
+
+                    <div className="transaction-list wallet-history-list">
+                        {wallet?.activity.length ? (
+                            wallet.activity.map((activity, index) => (
+                                <div
+                                    key={`${activity.block_id ?? "no-block"}-${activity.timestamp ?? "no-time"}-${index}`}
+                                    className="transaction-row wallet-history-row"
+                                >
+                                    <div>
+                                        <span className="hash-label">{getActivityTitle(activity)}</span>
+                                        <code
+                                            className={getWalletAddressClassName(
+                                                "hash-value",
+                                                activity.kind === "sent" ? activity.receiver : activity.sender,
+                                            )}
+                                            title={activity.kind === "sent" ? activity.receiver : activity.sender}
+                                        >
+                                            {activity.kind === "mined"
+                                                ? "SYSTEM -> You"
+                                                : activity.kind === "sent"
+                                                  ? `To: ${activity.receiver}`
+                                                  : `From: ${activity.sender}`}
+                                        </code>
+                                    </div>
+                                    <div>
+                                        <span className="hash-label">Amount</span>
+                                        <span className="transaction-amount">{formatActivityAmount(activity)}</span>
+                                    </div>
+                                    <div>
+                                        <span className="hash-label">Fee</span>
+                                        <span className="transaction-time">
+                                            {activity.fee > 0 ? `${formatWalletAmount(activity.fee)} UNC` : "0 UNC"}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span className="hash-label">Time</span>
+                                        <span className="transaction-time">
+                                            {activity.timestamp ? formatTimestamp(activity.timestamp) : "No timestamp"}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="empty-state">No wallet transactions found yet.</p>
+                        )}
+                    </div>
                 </article>
             </section>
         </PageScaffold>

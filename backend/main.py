@@ -1,6 +1,7 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -30,6 +31,20 @@ def parse_amount(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
 
 
 def collect_wallet_addresses(chain_data: Dict[str, Any]) -> set[str]:
@@ -67,10 +82,13 @@ def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str
     mined_block_count = 0
     block_appearance_count = 0
     latest_activity: str | None = None
+    activity: list[Dict[str, Any]] = []
 
     for block in blocks:
         transactions = block.get("transactions", [])
         block_has_wallet_activity = False
+        mining_reward_in_block = 0.0
+        block_timestamp: str | None = None
 
         for transaction in transactions:
             amount = parse_amount(transaction.get("amount"))
@@ -79,11 +97,25 @@ def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str
             receiver = transaction.get("receiver")
             timestamp = transaction.get("timestamp")
 
+            if not block_timestamp and isinstance(timestamp, str) and timestamp.strip():
+                block_timestamp = timestamp
+
             if sender == wallet_address:
                 sent_count += 1
                 total_sent += amount
                 total_fees_paid += fee
                 block_has_wallet_activity = True
+                activity.append(
+                    {
+                        "block_id": block.get("block_id"),
+                        "kind": "sent",
+                        "sender": sender,
+                        "receiver": receiver,
+                        "amount": amount,
+                        "fee": fee,
+                        "timestamp": timestamp,
+                    }
+                )
                 if timestamp:
                     latest_activity = timestamp
 
@@ -91,14 +123,56 @@ def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str
                 received_count += 1
                 total_received += amount
                 block_has_wallet_activity = True
+                if sender == "SYSTEM":
+                    mining_reward_in_block += amount
+                activity.append(
+                    {
+                        "block_id": block.get("block_id"),
+                        "kind": "mined" if sender == "SYSTEM" and block.get("description") == wallet_address else "received",
+                        "sender": sender,
+                        "receiver": receiver,
+                        "amount": amount,
+                        "fee": fee,
+                        "timestamp": timestamp,
+                    }
+                )
                 if timestamp:
                     latest_activity = timestamp
 
         if block.get("description") == wallet_address:
             mined_block_count += 1
+            if mining_reward_in_block <= 0:
+                activity.append(
+                    {
+                        "block_id": block.get("block_id"),
+                        "kind": "mined",
+                        "sender": "SYSTEM",
+                        "receiver": wallet_address,
+                        "amount": 0.0,
+                        "fee": 0.0,
+                        "timestamp": block_timestamp,
+                    }
+                )
 
         if block_has_wallet_activity:
             block_appearance_count += 1
+
+    activity.sort(
+        key=lambda entry: (
+            parse_timestamp(entry.get("timestamp")) or datetime.min,
+            entry.get("block_id") if isinstance(entry.get("block_id"), int) else -1,
+        ),
+        reverse=True,
+    )
+
+    latest_activity = next(
+        (
+            entry.get("timestamp")
+            for entry in activity
+            if isinstance(entry.get("timestamp"), str) and entry.get("timestamp").strip()
+        ),
+        latest_activity,
+    )
 
     return {
         "wallet_address": wallet_address,
@@ -112,6 +186,7 @@ def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str
         "mined_block_count": mined_block_count,
         "block_appearance_count": block_appearance_count,
         "latest_activity": latest_activity,
+        "activity": activity,
     }
 
 
