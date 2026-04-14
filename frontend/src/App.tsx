@@ -1639,14 +1639,104 @@ function BlockchainPage() {
     );
 }
 
-export default function App() {
+function RedAlertOverlay({ onDismiss }: { onDismiss: () => void }) {
     return (
-        <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/wallet" element={<WalletDashboardPage />} />
-            <Route path="/blockchain" element={<BlockchainPage />} />
-            <Route path="/stat" element={<StatPage />} />
-        </Routes>
+        <div className="red-alert-overlay" role="dialog" aria-modal="true" aria-label="Red alert crisis overlay">
+            <div className="red-alert-backdrop" />
+            <div className="red-alert-scanlines" aria-hidden="true" />
+            <div className="red-alert-shell">
+                <p className="red-alert-kicker">System Warning</p>
+                <h2 className="red-alert-title">Red Alert</h2>
+                <p className="red-alert-subtitle">
+                    UncCoin emergency mode engaged. Trading floor stability compromised. Immediate caution advised.
+                </p>
+                <div className="red-alert-grid">
+                    <article className="red-alert-card">
+                        <span className="red-alert-label">Status</span>
+                        <strong className="red-alert-value">Critical</strong>
+                    </article>
+                    <article className="red-alert-card">
+                        <span className="red-alert-label">Signal</span>
+                        <strong className="red-alert-value">Jammed</strong>
+                    </article>
+                    <article className="red-alert-card">
+                        <span className="red-alert-label">Protocol</span>
+                        <strong className="red-alert-value">Containment</strong>
+                    </article>
+                </div>
+                <div className="red-alert-ticker" aria-hidden="true">
+                    <span>market panic</span>
+                    <span>containment protocol</span>
+                    <span>volatility spike</span>
+                    <span>vault lockdown</span>
+                    <span>market panic</span>
+                    <span>containment protocol</span>
+                </div>
+                <button className="red-alert-dismiss" type="button" onClick={onDismiss}>
+                    Shut Down Alert
+                </button>
+            </div>
+        </div>
+    );
+}
+
+export default function App() {
+    const [isRedAlertArmed, setIsRedAlertArmed] = useState(false);
+    const [isRedAlertActive, setIsRedAlertActive] = useState(false);
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            const target = event.target;
+
+            if (
+                target instanceof HTMLElement &&
+                (target.tagName === "INPUT" ||
+                    target.tagName === "TEXTAREA" ||
+                    target.tagName === "SELECT" ||
+                    target.isContentEditable)
+            ) {
+                return;
+            }
+
+            if (event.key.toLowerCase() !== "j" || event.repeat) {
+                return;
+            }
+
+            setIsRedAlertActive(false);
+            setIsRedAlertArmed((current) => !current);
+        };
+
+        window.addEventListener("keydown", onKeyDown);
+
+        return () => {
+            window.removeEventListener("keydown", onKeyDown);
+        };
+    }, []);
+
+    const startRedAlert = () => {
+        setIsRedAlertActive(true);
+    };
+
+    const stopRedAlert = () => {
+        setIsRedAlertActive(false);
+        setIsRedAlertArmed(false);
+    };
+
+    return (
+        <>
+            {isRedAlertArmed ? (
+                <button className="red-alert-trigger" type="button" onClick={startRedAlert}>
+                    Red Alert
+                </button>
+            ) : null}
+            {isRedAlertActive ? <RedAlertOverlay onDismiss={stopRedAlert} /> : null}
+            <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/wallet" element={<WalletDashboardPage />} />
+                <Route path="/blockchain" element={<BlockchainPage />} />
+                <Route path="/stat" element={<StatPage />} />
+            </Routes>
+        </>
     );
 }

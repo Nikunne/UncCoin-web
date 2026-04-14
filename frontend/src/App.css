@@ -1114,6 +1114,187 @@ body::-webkit-scrollbar-thumb {
   transform: translateY(10px);
 }
 
+.red-alert-trigger {
+  position: fixed;
+  right: 20px;
+  bottom: 78px;
+  z-index: 1300;
+  min-width: 168px;
+  min-height: 54px;
+  padding: 12px 18px;
+  border: 1px solid rgba(255, 184, 184, 0.72);
+  background: linear-gradient(180deg, rgba(168, 18, 18, 0.96), rgba(104, 6, 6, 0.98));
+  color: #fff4ea;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.16rem;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 16px 36px rgba(71, 0, 0, 0.38), inset 0 1px 0 rgba(255, 225, 225, 0.16);
+}
+
+.red-alert-trigger:hover,
+.red-alert-trigger:focus-visible {
+  background: linear-gradient(180deg, rgba(196, 28, 28, 0.98), rgba(127, 8, 8, 1));
+  border-color: rgba(255, 214, 214, 0.92);
+}
+
+.red-alert-trigger:focus-visible {
+  outline: 2px solid rgba(255, 218, 218, 0.8);
+  outline-offset: 2px;
+}
+
+.red-alert-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.red-alert-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 98, 74, 0.2), transparent 24%),
+    radial-gradient(circle at 80% 30%, rgba(255, 41, 41, 0.18), transparent 20%),
+    linear-gradient(180deg, rgba(25, 0, 0, 0.7), rgba(4, 0, 0, 0.9));
+  animation: red-alert-pulse 1.2s ease-in-out infinite;
+}
+
+.red-alert-scanlines {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.03) 0,
+    rgba(255, 255, 255, 0.03) 2px,
+    transparent 2px,
+    transparent 8px
+  );
+  mix-blend-mode: screen;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.red-alert-shell {
+  position: relative;
+  z-index: 1;
+  width: min(760px, 100%);
+  padding: 28px 28px 24px;
+  border: 1px solid rgba(255, 171, 171, 0.42);
+  background:
+    radial-gradient(circle at top, rgba(255, 101, 72, 0.18), transparent 32%),
+    linear-gradient(180deg, rgba(58, 6, 6, 0.95), rgba(22, 2, 2, 0.98));
+  color: #ffe8dc;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 225, 225, 0.08);
+}
+
+.red-alert-kicker,
+.red-alert-label {
+  margin: 0 0 10px;
+  color: #ffb4a5;
+  font-size: 0.78rem;
+  letter-spacing: 0.24rem;
+  text-transform: uppercase;
+}
+
+.red-alert-title {
+  margin: 0;
+  color: #fff1eb;
+  font-size: clamp(3rem, 10vw, 5.6rem);
+  line-height: 0.92;
+  text-transform: uppercase;
+  text-shadow: 0 0 24px rgba(255, 86, 61, 0.32);
+}
+
+.red-alert-subtitle {
+  margin: 18px 0 22px;
+  max-width: 36rem;
+  color: #ffd8cd;
+  font-size: 1rem;
+}
+
+.red-alert-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.red-alert-card {
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 171, 171, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.red-alert-value {
+  color: #fff2ea;
+  font-size: 1.3rem;
+}
+
+.red-alert-ticker {
+  display: flex;
+  gap: 24px;
+  padding: 12px 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #ffb4a5;
+  text-transform: uppercase;
+  letter-spacing: 0.14rem;
+  border-top: 1px solid rgba(255, 171, 171, 0.18);
+  border-bottom: 1px solid rgba(255, 171, 171, 0.18);
+  animation: red-alert-ticker 5s linear infinite;
+}
+
+.red-alert-dismiss {
+  margin-top: 18px;
+  min-height: 50px;
+  padding: 12px 18px;
+  border: 1px solid rgba(255, 185, 185, 0.62);
+  background: linear-gradient(180deg, rgba(134, 16, 16, 0.96), rgba(77, 6, 6, 0.98));
+  color: #fff2eb;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.12rem;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.red-alert-dismiss:hover,
+.red-alert-dismiss:focus-visible {
+  border-color: rgba(255, 222, 222, 0.88);
+  background: linear-gradient(180deg, rgba(165, 22, 22, 0.98), rgba(99, 8, 8, 1));
+}
+
+.red-alert-dismiss:focus-visible {
+  outline: 2px solid rgba(255, 222, 222, 0.72);
+  outline-offset: 2px;
+}
+
+@keyframes red-alert-pulse {
+  0%,
+  100% {
+    opacity: 0.88;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes red-alert-ticker {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-25%);
+  }
+}
+
 .empty-state {
   margin: 0;
 }
@@ -1131,6 +1312,17 @@ body::-webkit-scrollbar-thumb {
 @media (max-width: 700px) {
   .balances-page {
     padding: 24px 12px 40px;
+  }
+
+  .red-alert-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .red-alert-trigger {
+    right: 12px;
+    bottom: 70px;
+    min-width: 0;
+    width: calc(100% - 24px);
   }
 
   .breaking-investment-banner {
