@@ -42,7 +42,6 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
   width: min(980px, 100%);
   margin: 0 auto 18px;
   padding: 10px 14px;
@@ -52,25 +51,13 @@
   color: #fff1cc;
   text-decoration: none;
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.24);
-}
-
-.breaking-investment-badge {
-  position: relative;
-  z-index: 1;
-  flex-shrink: 0;
-  padding: 6px 10px;
-  background: #f7d287;
-  color: #4a1807;
-  font-size: 0.76rem;
-  font-weight: 800;
-  letter-spacing: 0.12rem;
-  text-transform: uppercase;
+  justify-content: flex-start;
 }
 
 .breaking-investment-track {
   display: flex;
   min-width: max-content;
-  gap: 28px;
+  gap: 18px;
   font-size: 0.92rem;
   font-weight: 700;
   letter-spacing: 0.08rem;
@@ -80,7 +67,7 @@
 
 .breaking-investment-item::after {
   content: "//";
-  margin-left: 28px;
+  margin-left: 18px;
   color: rgba(255, 230, 176, 0.58);
 }
 
@@ -136,22 +123,25 @@
 }
 
 .page-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 12px;
-  justify-content: center;
+  align-items: stretch;
   width: min(980px, 100%);
   margin: 0 auto 24px;
 }
 
 .site-nav-item {
   display: flex;
-  justify-content: center;
+  min-width: 0;
 }
 
 .site-nav-link,
 .investment-link {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   min-height: 42px;
   padding: 10px 16px;
   border: 1px solid rgba(255, 220, 156, 0.4);
@@ -745,9 +735,14 @@
 }
 
 .transaction-row-compact {
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) auto auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 12px;
   padding: 8px 10px;
+}
+
+.transaction-row-compact > :nth-child(1),
+.transaction-row-compact > :nth-child(2) {
+  grid-column: 1 / -1;
 }
 
 .block-card-compact .block-card-header {
@@ -919,13 +914,7 @@
   }
 
   .breaking-investment-banner {
-    gap: 10px;
     padding: 9px 10px;
-  }
-
-  .breaking-investment-badge {
-    padding: 5px 8px;
-    font-size: 0.68rem;
   }
 
   .breaking-investment-track {

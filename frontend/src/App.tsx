@@ -13,12 +13,7 @@ const CHART_PADDING = 64;
 const CHART_TICK_COUNT = 6;
 const CHART_Y_TICK_COUNT = 5;
 const WALLET_SESSION_KEY = "unc-wallet-address";
-const INVESTMENT_BANNER_TEXT = [
-    "AKKURAT NAA",
-    "INVESTER I UNC-COIN",
-    "100% ULTRA SERIOS WEB3-EIENDOM*",
-    "KLIKK FOR PROSPEKT",
-];
+const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
 
 function formatTimestamp(timestamp: string): string {
     const parsed = new Date(timestamp);
@@ -180,7 +175,6 @@ function TopInvestmentTicker() {
             target="_blank"
             rel="noreferrer"
         >
-            <span className="breaking-investment-badge">Akkurat naa</span>
             <span className="breaking-investment-track" aria-hidden="true">
                 {tickerItems.map((item, index) => (
                     <span key={`${item}-${index}`} className="breaking-investment-item">
@@ -188,9 +182,7 @@ function TopInvestmentTicker() {
                     </span>
                 ))}
             </span>
-            <span className="sr-only">
-                Akkurat naa: Invester i UncCoin. Klikk for prospekt.
-            </span>
+            <span className="sr-only">Early investor? Click here!</span>
         </a>
     );
 }
@@ -379,11 +371,6 @@ function HomePage() {
 
     return (
         <PageScaffold>
-            <header className="masthead">
-                <h1 className="balances-title">UncCoin</h1>
-                <p className="masthead-subtitle">The most genuine cryptocurrency ever*</p>
-            </header>
-
             <PageNav
                 items={[
                     { to: "/", label: "Balances", active: true },
@@ -392,6 +379,10 @@ function HomePage() {
                     { to: "/login", label: "Login", kind: "login" },
                 ]}
             />
+            <header className="masthead">
+                <h1 className="balances-title">UncCoin</h1>
+                <p className="masthead-subtitle">The most genuine cryptocurrency ever*</p>
+            </header>
 
             <section className="balances-shell" aria-label="UncCoin balances">
                 <div className="balances-meta">
@@ -503,14 +494,6 @@ function LoginPage() {
 
     return (
         <PageScaffold>
-            <header className="masthead masthead-left">
-                <p className="masthead-kicker">Wallet Access</p>
-                <h1 className="balances-title">UncCoin Login</h1>
-                <p className="masthead-subtitle">
-                    Log in with your wallet address. Temporary password for now: 1234.
-                </p>
-            </header>
-
             <PageNav
                 items={[
                     { to: "/", label: "Balances" },
@@ -519,6 +502,14 @@ function LoginPage() {
                     { to: "/login", label: "Login", kind: "login", active: true },
                 ]}
             />
+            <header className="masthead masthead-left">
+                <p className="masthead-kicker">Wallet Access</p>
+                <h1 className="balances-title">UncCoin Login</h1>
+                <p className="masthead-subtitle">
+                    Log in with your wallet address. Temporary password for now: 1234.
+                </p>
+            </header>
+
 
             <section className="balances-shell login-shell" aria-label="Wallet login">
                 <form className="wallet-login-form" onSubmit={onSubmit}>
@@ -621,14 +612,6 @@ function WalletDashboardPage() {
 
     return (
         <PageScaffold>
-            <header className="masthead masthead-left">
-                <p className="masthead-kicker">Wallet Dashboard</p>
-                <h1 className="balances-title">My UncCoin Wallet</h1>
-                <p className="masthead-subtitle">
-                    Wallet-specific balance and activity pulled from the live balance sheet and blockchain data.
-                </p>
-            </header>
-
             <PageNav
                 items={[
                     { to: "/", label: "Balances" },
@@ -638,6 +621,14 @@ function WalletDashboardPage() {
                     { label: "Log out", onClick: logOut },
                 ]}
             />
+            <header className="masthead masthead-left">
+                <p className="masthead-kicker">Wallet Dashboard</p>
+                <h1 className="balances-title">My UncCoin Wallet</h1>
+                <p className="masthead-subtitle">
+                    Wallet-specific balance and activity pulled from the live balance sheet and blockchain data.
+                </p>
+            </header>
+
 
             <section className="balances-shell" aria-label="Logged in wallet">
                 <div className="balances-meta">
@@ -763,14 +754,6 @@ function StatPage() {
 
     return (
         <PageScaffold>
-            <header className="masthead masthead-left">
-                <p className="masthead-kicker">Stats</p>
-                <h1 className="balances-title">UncCoin Supply</h1>
-                <p className="masthead-subtitle">
-                    Total UncCoins in existence over time, derived from blockchain timestamps and SYSTEM issuance.
-                </p>
-            </header>
-
             <PageNav
                 items={[
                     { to: "/", label: "Balances" },
@@ -779,6 +762,14 @@ function StatPage() {
                     { to: "/login", label: "Login", kind: "login" },
                 ]}
             />
+            <header className="masthead masthead-left">
+                <p className="masthead-kicker">Stats</p>
+                <h1 className="balances-title">UncCoin Supply</h1>
+                <p className="masthead-subtitle">
+                    Total UncCoins in existence over time, derived from blockchain timestamps and SYSTEM issuance.
+                </p>
+            </header>
+
 
             <section className="balances-shell" aria-label="UncCoin supply statistics">
                 <div className="balances-meta">
@@ -1051,14 +1042,6 @@ function BlockchainPage() {
 
     return (
         <PageScaffold>
-            <header className="masthead masthead-left">
-                <p className="masthead-kicker">Chain View</p>
-                <h1 className="balances-title">UncCoin Blockchain</h1>
-                <p className="masthead-subtitle">
-                    Current chain state in a tighter layout, with a quick switch to today&apos;s on-chain activity.
-                </p>
-            </header>
-
             <PageNav
                 items={[
                     { to: "/", label: "Balances" },
@@ -1068,6 +1051,14 @@ function BlockchainPage() {
                     { label: "Bottom", onClick: scrollToBottom },
                 ]}
             />
+            <header className="masthead masthead-left">
+                <p className="masthead-kicker">Chain View</p>
+                <h1 className="balances-title">UncCoin Blockchain</h1>
+                <p className="masthead-subtitle">
+                    Current chain state in a tighter layout, with a quick switch to today&apos;s on-chain activity.
+                </p>
+            </header>
+
 
             <section className="balances-shell" aria-label="UncCoin blockchain overview">
                 <div className="balances-meta">
