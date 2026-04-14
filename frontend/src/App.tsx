@@ -15,6 +15,7 @@ const CHART_TICK_COUNT = 6;
 const CHART_Y_TICK_COUNT = 5;
 const WALLET_SESSION_KEY = "unc-wallet-address";
 const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1";
+const SECONDARY_WALLET_ADDRESS = "fe269f427a5ad619ce480192db583a29a7ce4098b22111d9b7216e2fee6bc964";
 const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
 const HEI_FREDERIK_PATTERN = /heifrederik\d*/i;
 
@@ -58,7 +59,15 @@ function formatBlockShare(count: number, total: number): string {
 }
 
 function getWalletAddressClassName(baseClassName: string, address: string): string {
-    return address === FEATURED_WALLET_ADDRESS ? `${baseClassName} featured-wallet-address` : baseClassName;
+    if (address === FEATURED_WALLET_ADDRESS) {
+        return `${baseClassName} featured-wallet-address`;
+    }
+
+    if (address === SECONDARY_WALLET_ADDRESS) {
+        return `${baseClassName} secondary-wallet-address`;
+    }
+
+    return baseClassName;
 }
 
 function usePrevious<T>(value: T): T | undefined {

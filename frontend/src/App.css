@@ -654,6 +654,12 @@ body::-webkit-scrollbar-thumb {
     -0.015em 0 0 currentColor;
 }
 
+.secondary-wallet-address {
+  text-shadow:
+    0.009em 0 0 currentColor,
+    -0.009em 0 0 currentColor;
+}
+
 .wallet-login-form {
   display: flex;
   flex-direction: column;
