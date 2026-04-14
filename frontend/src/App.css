@@ -524,6 +524,14 @@ body::-webkit-scrollbar-thumb {
   margin-bottom: 16px;
 }
 
+.blockchain-snapshot-shell {
+  margin-bottom: 18px;
+}
+
+.blockchain-snapshot-grid {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
 .blockchain-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

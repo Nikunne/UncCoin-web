@@ -7,6 +7,7 @@ import "./App.css";
 
 const INITIAL_BLOCKS_VISIBLE = 25;
 const BLOCKS_PER_BATCH = 25;
+const RECENT_BLOCK_STATS_WINDOW = 100;
 const CHART_WIDTH = 920;
 const CHART_HEIGHT = 352;
 const CHART_PADDING = 64;
@@ -14,6 +15,7 @@ const CHART_TICK_COUNT = 6;
 const CHART_Y_TICK_COUNT = 5;
 const WALLET_SESSION_KEY = "unc-wallet-address";
 const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
+const HEI_FREDERIK_PATTERN = /^heiFrederik\d+$/;
 
 function formatTimestamp(timestamp: string): string {
     const parsed = new Date(timestamp);
@@ -45,6 +47,31 @@ function formatTotalAmount(value: number): string {
     return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0";
 }
 
+function formatBlockShare(count: number, total: number): string {
+    if (total <= 0) {
+        return "0%";
+    }
+
+    return `${((count / total) * 100).toFixed(1)}%`;
+}
+
+function formatMinerList(miners: Array<[string, number]>, total: number): string {
+    if (miners.length === 0) {
+        return "No matches in the recent sample.";
+    }
+
+    const visibleMiners = miners
+        .slice(0, 4)
+        .map(([name, count]) => `${name} ${formatBlockShare(count, total)}`);
+    const remainingCount = miners.length - visibleMiners.length;
+
+    if (remainingCount > 0) {
+        visibleMiners.push(`+${remainingCount} more`);
+    }
+
+    return visibleMiners.join(", ");
+}
+
 function usePrevious<T>(value: T): T | undefined {
     const [previous, setPrevious] = useState<T>();
 
@@ -57,6 +84,7 @@ function usePrevious<T>(value: T): T | undefined {
 
 type SupplyPoint = {
     timestamp: string;
+    timestampMs: number;
     totalSupply: number;
     label: string;
     dateLabel: string;
@@ -66,6 +94,7 @@ type SupplyPoint = {
 function buildSupplySeries(blocks: BlockchainBlock[]): SupplyPoint[] {
     let totalSupply = 0;
     const series: SupplyPoint[] = [];
+    let fallbackTimestampMs = 0;
 
     for (const block of blocks) {
         let blockTimestamp: string | null = null;
@@ -86,20 +115,23 @@ function buildSupplySeries(blocks: BlockchainBlock[]): SupplyPoint[] {
 
         if (blockTimestamp) {
             const parsed = new Date(blockTimestamp);
-            const dateLabel = Number.isNaN(parsed.getTime())
-                ? blockTimestamp
-                : parsed.toLocaleDateString();
-            const timeLabel = Number.isNaN(parsed.getTime())
-                ? ""
-                : parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const parsedTime = parsed.getTime();
+            const hasValidTimestamp = !Number.isNaN(parsedTime);
+            const timestampMs = hasValidTimestamp ? parsedTime : fallbackTimestampMs + 1;
+            const dateLabel = hasValidTimestamp ? parsed.toLocaleDateString() : blockTimestamp;
+            const timeLabel = hasValidTimestamp
+                ? parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                : "";
 
             series.push({
                 timestamp: blockTimestamp,
+                timestampMs,
                 totalSupply,
                 label: formatTimestamp(blockTimestamp),
                 dateLabel,
                 timeLabel,
             });
+            fallbackTimestampMs = timestampMs;
         }
     }
 
@@ -114,28 +146,16 @@ function loadStoredWalletAddress(): string {
     return window.localStorage.getItem(WALLET_SESSION_KEY) ?? "";
 }
 
-function getTickIndices(length: number, desiredCount: number): number[] {
-    if (length <= 0) {
-        return [];
-    }
-
-    if (length <= desiredCount) {
-        return Array.from({ length }, (_, index) => index);
-    }
-
-    const indices = new Set<number>();
-
-    for (let step = 0; step < desiredCount; step += 1) {
-        const index = Math.round((step / (desiredCount - 1)) * (length - 1));
-        indices.add(index);
-    }
-
-    return [...indices].sort((left, right) => left - right);
-}
-
 type YAxisTick = {
     value: number;
     y: number;
+};
+
+type XAxisTick = {
+    value: number;
+    x: number;
+    dateLabel: string;
+    timeLabel: string;
 };
 
 type NavItem = {
@@ -296,6 +316,35 @@ function buildYAxisTicks(maxSupply: number): YAxisTick[] {
         const y = CHART_PADDING + ratio * (CHART_HEIGHT - CHART_PADDING * 2);
 
         return { value, y };
+    });
+}
+
+function buildXAxisTicks(minTimestamp: number, maxTimestamp: number): XAxisTick[] {
+    if (minTimestamp === maxTimestamp) {
+        const parsed = new Date(minTimestamp);
+
+        return [
+            {
+                value: minTimestamp,
+                x: CHART_PADDING,
+                dateLabel: parsed.toLocaleDateString(),
+                timeLabel: parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            },
+        ];
+    }
+
+    return Array.from({ length: CHART_TICK_COUNT }, (_, index) => {
+        const ratio = index / (CHART_TICK_COUNT - 1);
+        const value = minTimestamp + ratio * (maxTimestamp - minTimestamp);
+        const parsed = new Date(value);
+        const x = CHART_PADDING + ratio * (CHART_WIDTH - CHART_PADDING * 2);
+
+        return {
+            value,
+            x,
+            dateLabel: parsed.toLocaleDateString(),
+            timeLabel: parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
     });
 }
 
@@ -716,12 +765,22 @@ function StatPage() {
     const latestPoint = supplySeries.at(-1);
     const firstPoint = supplySeries[0];
     const maxSupply = supplySeries.reduce((max, point) => Math.max(max, point.totalSupply), 0);
+    const minTimestamp = supplySeries.reduce(
+        (min, point) => Math.min(min, point.timestampMs),
+        supplySeries[0]?.timestampMs ?? 0,
+    );
+    const maxTimestamp = supplySeries.reduce(
+        (max, point) => Math.max(max, point.timestampMs),
+        supplySeries[0]?.timestampMs ?? 0,
+    );
 
-    const points = supplySeries.map((point, index) => {
+    const points = supplySeries.map((point) => {
         const x =
-            supplySeries.length <= 1
+            minTimestamp === maxTimestamp
                 ? CHART_PADDING
-                : CHART_PADDING + (index / (supplySeries.length - 1)) * (CHART_WIDTH - CHART_PADDING * 2);
+                : CHART_PADDING +
+                  ((point.timestampMs - minTimestamp) / (maxTimestamp - minTimestamp)) *
+                      (CHART_WIDTH - CHART_PADDING * 2);
         const y =
             maxSupply === 0
                 ? CHART_HEIGHT - CHART_PADDING
@@ -734,8 +793,7 @@ function StatPage() {
     const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
     const xAxisY = CHART_HEIGHT - CHART_PADDING;
     const yAxisX = CHART_PADDING;
-    const tickIndices = getTickIndices(points.length, CHART_TICK_COUNT);
-    const tickPoints = tickIndices.map((index) => points[index]).filter(Boolean);
+    const xAxisTicks = points.length > 0 ? buildXAxisTicks(minTimestamp, maxTimestamp) : [];
     const yAxisTicks = buildYAxisTicks(maxSupply);
 
     return (
@@ -825,18 +883,18 @@ function StatPage() {
                                             y2={tick.y}
                                         />
                                     ))}
-                                    {tickPoints.map((point) => (
+                                    {xAxisTicks.map((tick) => (
                                         <line
-                                            key={`grid-${point.timestamp}-${point.x}`}
+                                            key={`grid-${tick.value}-${tick.x}`}
                                             className="stat-grid-vertical"
-                                            x1={point.x}
+                                            x1={tick.x}
                                             y1={CHART_PADDING}
-                                            x2={point.x}
+                                            x2={tick.x}
                                             y2={xAxisY}
                                         />
                                     ))}
                                     <polyline className="stat-line" points={polylinePoints} />
-                                    {tickPoints.map((point) => (
+                                    {points.map((point) => (
                                         <circle
                                             key={`point-${point.timestamp}-${point.x}`}
                                             className="stat-point"
@@ -855,24 +913,24 @@ function StatPage() {
                                             {tick.value}
                                         </text>
                                     ))}
-                                    {tickPoints.map((point, index) => (
+                                    {xAxisTicks.map((tick, index) => (
                                         <text
-                                            key={`label-${point.timestamp}-${point.x}`}
+                                            key={`label-${tick.value}-${tick.x}`}
                                             className={`stat-label ${
                                                 index === 0
                                                     ? ""
-                                                    : index === tickPoints.length - 1
+                                                    : index === xAxisTicks.length - 1
                                                       ? "stat-label-end"
                                                       : "stat-label-middle"
                                             }`}
-                                            x={point.x}
+                                            x={tick.x}
                                             y={CHART_HEIGHT - 26}
                                         >
-                                            <tspan x={point.x} dy="0">
-                                                {point.dateLabel}
+                                            <tspan x={tick.x} dy="0">
+                                                {tick.dateLabel}
                                             </tspan>
-                                            <tspan x={point.x} dy="14">
-                                                {point.timeLabel}
+                                            <tspan x={tick.x} dy="14">
+                                                {tick.timeLabel}
                                             </tspan>
                                         </text>
                                     ))}
@@ -924,12 +982,36 @@ function BlockchainPage() {
     }, []);
 
     const blocks: BlockchainBlock[] = blockchain?.blocks ?? [];
-    const addresses = Array.from(
-        new Set(
-            blocks.flatMap((block) =>
+    const knownWalletAddresses = new Set(
+        [
+            blockchain?.wallet_address ?? "",
+            ...blocks.flatMap((block) =>
                 block.transactions.flatMap((transaction) => [transaction.sender, transaction.receiver]),
             ),
-        ),
+        ].filter((address) => address.trim().length > 0),
+    );
+    const recentMiningWindow = blocks.slice(-RECENT_BLOCK_STATS_WINDOW);
+    const smileMinedBlocks = recentMiningWindow.filter((block) => block.description.trim() === ":)");
+    const heiFrederikMinedBlocks = recentMiningWindow.filter((block) =>
+        HEI_FREDERIK_PATTERN.test(block.description.trim()),
+    );
+    const walletMinedBlocks = recentMiningWindow.filter((block) => knownWalletAddresses.has(block.description.trim()));
+    const heiFrederikMiners = Object.entries(
+        heiFrederikMinedBlocks.reduce<Record<string, number>>((counts, block) => {
+            const minerName = block.description.trim();
+            counts[minerName] = (counts[minerName] ?? 0) + 1;
+            return counts;
+        }, {}),
+    ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+    const walletMinerDistribution = Object.entries(
+        walletMinedBlocks.reduce<Record<string, number>>((counts, block) => {
+            const minerName = block.description.trim();
+            counts[minerName] = (counts[minerName] ?? 0) + 1;
+            return counts;
+        }, {}),
+    ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+    const addresses = Array.from(
+        knownWalletAddresses,
     ).sort((left, right) => left.localeCompare(right));
     const filteredBlocks = selectedAddress
         ? blocks.filter((block) =>
@@ -1041,6 +1123,49 @@ function BlockchainPage() {
                 </p>
             </header>
 
+            <section className="balances-shell blockchain-snapshot-shell" aria-label="Recent block mining stats">
+                <div className="balances-meta">
+                    <span className="balances-section-title">Last {RECENT_BLOCK_STATS_WINDOW} Blocks</span>
+                    <p className="last-updated">Tracking mining descriptions in the latest sample.</p>
+                </div>
+
+                <div className="chain-stats blockchain-snapshot-grid">
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Sample Size</span>
+                        <strong className="chain-stat-value">{recentMiningWindow.length}</strong>
+                        <span className="chain-stat-mini">
+                            Using the newest blocks currently available on the chain.
+                        </span>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Mined With ":)"</span>
+                        <strong className="chain-stat-value">
+                            {formatBlockShare(smileMinedBlocks.length, recentMiningWindow.length)}
+                        </strong>
+                        <span className="chain-stat-mini">
+                            {smileMinedBlocks.length} of {recentMiningWindow.length} recent blocks.
+                        </span>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Mined With heiFrederik#</span>
+                        <strong className="chain-stat-value">
+                            {formatBlockShare(heiFrederikMinedBlocks.length, recentMiningWindow.length)}
+                        </strong>
+                        <span className="chain-stat-mini">
+                            {formatMinerList(heiFrederikMiners, recentMiningWindow.length)}
+                        </span>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Wallet Miner Distribution</span>
+                        <strong className="chain-stat-value">
+                            {formatBlockShare(walletMinedBlocks.length, recentMiningWindow.length)}
+                        </strong>
+                        <span className="chain-stat-mini">
+                            {formatMinerList(walletMinerDistribution, walletMinedBlocks.length)}
+                        </span>
+                    </article>
+                </div>
+            </section>
 
             <section className="balances-shell" aria-label="UncCoin blockchain overview">
                 <div className="balances-meta">
