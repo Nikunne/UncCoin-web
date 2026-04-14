@@ -458,11 +458,13 @@ function buildXAxisTicks(minTimestamp: number, maxTimestamp: number): XAxisTick[
 }
 
 function HomePage() {
+    const navigate = useNavigate();
     const [balances, setBalances] = useState<BalanceRow[]>([]);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [copiedUser, setCopiedUser] = useState<string | null>(null);
     const [copiedToast, setCopiedToast] = useState<string | null>(null);
     const [isCopyToastVisible, setIsCopyToastVisible] = useState(false);
+    const [isRShortcutPressed, setIsRShortcutPressed] = useState(false);
     const totalUncCoins = balances.reduce((sum, [, amount]) => sum + amount, 0);
 
     useEffect(() => {
@@ -493,6 +495,34 @@ function HomePage() {
         };
     }, []);
 
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key.toLowerCase() === "r" && !event.repeat) {
+                setIsRShortcutPressed(true);
+            }
+        };
+
+        const onKeyUp = (event: KeyboardEvent) => {
+            if (event.key.toLowerCase() === "r") {
+                setIsRShortcutPressed(false);
+            }
+        };
+
+        const resetShortcut = () => {
+            setIsRShortcutPressed(false);
+        };
+
+        window.addEventListener("keydown", onKeyDown);
+        window.addEventListener("keyup", onKeyUp);
+        window.addEventListener("blur", resetShortcut);
+
+        return () => {
+            window.removeEventListener("keydown", onKeyDown);
+            window.removeEventListener("keyup", onKeyUp);
+            window.removeEventListener("blur", resetShortcut);
+        };
+    }, []);
+
     const copyAddress = async (user: string) => {
         try {
             await navigator.clipboard.writeText(user);
@@ -511,6 +541,20 @@ function HomePage() {
         } catch (error) {
             console.error(error);
         }
+    };
+
+    const openWalletDashboard = (user: string) => {
+        window.localStorage.setItem(WALLET_SESSION_KEY, user);
+        navigate("/wallet");
+    };
+
+    const handleBalanceAddressClick = (user: string) => {
+        if (isRShortcutPressed) {
+            openWalletDashboard(user);
+            return;
+        }
+
+        void copyAddress(user);
     };
 
     return (
@@ -568,9 +612,13 @@ function HomePage() {
                                 className={getWalletAddressClassName("balance-user", user)}
                                 type="button"
                                 onClick={() => {
-                                    void copyAddress(user);
+                                    handleBalanceAddressClick(user);
                                 }}
-                                title={`Copy ${user}`}
+                                title={
+                                    isRShortcutPressed
+                                        ? `Open wallet dashboard for ${user}`
+                                        : `Copy ${user} or hold R and click to open wallet`
+                                }
                             >
                                 {user}
                             </button>
