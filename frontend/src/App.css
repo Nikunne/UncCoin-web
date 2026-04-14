@@ -149,7 +149,7 @@ body::-webkit-scrollbar-thumb {
   gap: 12px;
   align-items: stretch;
   width: min(980px, 100%);
-  margin: 0 auto 12px;
+  margin: 12px auto 0;
 }
 
 .page-nav-shell {
@@ -175,15 +175,10 @@ body::-webkit-scrollbar-thumb {
   width: max-content;
   gap: 12px;
   padding: 10px 12px;
-  animation: page-actions-marquee 24s linear infinite;
+  animation: page-actions-marquee 8s linear infinite;
 }
 
-.page-actions-marquee:hover .page-actions-marquee-track,
-.page-actions-marquee:focus-within .page-actions-marquee-track {
-  animation-play-state: paused;
-}
-
-.page-actions-marquee-link {
+.page-actions-marquee .page-actions-marquee-link {
   width: auto;
   min-width: 180px;
   flex: 0 0 auto;
