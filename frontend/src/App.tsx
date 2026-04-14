@@ -833,7 +833,7 @@ function StatPage() {
 
     const blocks = blockchain?.blocks ?? [];
     const supplySeries = buildSupplySeries(blocks);
-    const latestPoint = supplySeries.at(-1);
+    const latestPoint = supplySeries.length > 0 ? supplySeries[supplySeries.length - 1] : undefined;
     const firstPoint = supplySeries[0];
     const maxSupply = supplySeries.reduce((max, point) => Math.max(max, point.totalSupply), 0);
     const minTimestamp = supplySeries.reduce(
@@ -1097,7 +1097,7 @@ function BlockchainPage() {
         : blocks;
     const sortedBlocks = [...filteredBlocks].reverse();
     const recentBlocks = sortedBlocks.slice(0, visibleBlocks);
-    const latestBlock = filteredBlocks.at(-1);
+    const latestBlock = filteredBlocks.length > 0 ? filteredBlocks[filteredBlocks.length - 1] : undefined;
     const pendingTransactions = blockchain?.pending_transactions?.length ?? 0;
 
     useEffect(() => {
