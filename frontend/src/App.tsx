@@ -15,7 +15,7 @@ const CHART_TICK_COUNT = 6;
 const CHART_Y_TICK_COUNT = 5;
 const WALLET_SESSION_KEY = "unc-wallet-address";
 const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
-const HEI_FREDERIK_PATTERN = /^heiFrederik\d+$/;
+const HEI_FREDERIK_PATTERN = /heifrederik\d*/i;
 
 function formatTimestamp(timestamp: string): string {
     const parsed = new Date(timestamp);
@@ -52,24 +52,8 @@ function formatBlockShare(count: number, total: number): string {
         return "0%";
     }
 
-    return `${((count / total) * 100).toFixed(1)}%`;
-}
-
-function formatMinerList(miners: Array<[string, number]>, total: number): string {
-    if (miners.length === 0) {
-        return "No matches in the recent sample.";
-    }
-
-    const visibleMiners = miners
-        .slice(0, 4)
-        .map(([name, count]) => `${name} ${formatBlockShare(count, total)}`);
-    const remainingCount = miners.length - visibleMiners.length;
-
-    if (remainingCount > 0) {
-        visibleMiners.push(`+${remainingCount} more`);
-    }
-
-    return visibleMiners.join(", ");
+    const percentage = ((count / total) * 100).toFixed(1);
+    return `${percentage.endsWith(".0") ? percentage.slice(0, -2) : percentage}%`;
 }
 
 function usePrevious<T>(value: T): T | undefined {
@@ -993,16 +977,9 @@ function BlockchainPage() {
     const recentMiningWindow = blocks.slice(-RECENT_BLOCK_STATS_WINDOW);
     const smileMinedBlocks = recentMiningWindow.filter((block) => block.description.trim() === ":)");
     const heiFrederikMinedBlocks = recentMiningWindow.filter((block) =>
-        HEI_FREDERIK_PATTERN.test(block.description.trim()),
+        HEI_FREDERIK_PATTERN.test(block.description),
     );
     const walletMinedBlocks = recentMiningWindow.filter((block) => knownWalletAddresses.has(block.description.trim()));
-    const heiFrederikMiners = Object.entries(
-        heiFrederikMinedBlocks.reduce<Record<string, number>>((counts, block) => {
-            const minerName = block.description.trim();
-            counts[minerName] = (counts[minerName] ?? 0) + 1;
-            return counts;
-        }, {}),
-    ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
     const walletMinerDistribution = Object.entries(
         walletMinedBlocks.reduce<Record<string, number>>((counts, block) => {
             const minerName = block.description.trim();
@@ -1131,40 +1108,34 @@ function BlockchainPage() {
 
                 <div className="chain-stats blockchain-snapshot-grid">
                     <article className="chain-stat-card">
-                        <span className="chain-stat-label">Sample Size</span>
-                        <strong className="chain-stat-value">{recentMiningWindow.length}</strong>
-                        <span className="chain-stat-mini">
-                            Using the newest blocks currently available on the chain.
-                        </span>
-                    </article>
-                    <article className="chain-stat-card">
                         <span className="chain-stat-label">Mined With ":)"</span>
-                        <strong className="chain-stat-value">
-                            {formatBlockShare(smileMinedBlocks.length, recentMiningWindow.length)}
-                        </strong>
-                        <span className="chain-stat-mini">
-                            {smileMinedBlocks.length} of {recentMiningWindow.length} recent blocks.
-                        </span>
+                        <strong className="chain-stat-value">{formatBlockShare(smileMinedBlocks.length, recentMiningWindow.length)}</strong>
                     </article>
                     <article className="chain-stat-card">
-                        <span className="chain-stat-label">Mined With heiFrederik#</span>
-                        <strong className="chain-stat-value">
-                            {formatBlockShare(heiFrederikMinedBlocks.length, recentMiningWindow.length)}
-                        </strong>
-                        <span className="chain-stat-mini">
-                            {formatMinerList(heiFrederikMiners, recentMiningWindow.length)}
-                        </span>
-                    </article>
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Wallet Miner Distribution</span>
-                        <strong className="chain-stat-value">
-                            {formatBlockShare(walletMinedBlocks.length, recentMiningWindow.length)}
-                        </strong>
-                        <span className="chain-stat-mini">
-                            {formatMinerList(walletMinerDistribution, walletMinedBlocks.length)}
-                        </span>
+                        <span className="chain-stat-label">Mined With heiFrederik</span>
+                        <strong className="chain-stat-value">{formatBlockShare(heiFrederikMinedBlocks.length, recentMiningWindow.length)}</strong>
                     </article>
                 </div>
+
+                <article className="chain-stat-card blockchain-distribution-card">
+                    <span className="chain-stat-label">Wallet Miner Distribution</span>
+                    {walletMinerDistribution.length > 0 ? (
+                        <div className="blockchain-distribution-list">
+                            {walletMinerDistribution.map(([address, count]) => (
+                                <div key={address} className="blockchain-distribution-row">
+                                    <code className="hash-value blockchain-distribution-address" title={address}>
+                                        {address}
+                                    </code>
+                                    <span className="blockchain-distribution-share">
+                                        {formatBlockShare(count, walletMinedBlocks.length)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="empty-state">No wallet miners in the latest 100 blocks.</p>
+                    )}
+                </article>
             </section>
 
             <section className="balances-shell" aria-label="UncCoin blockchain overview">

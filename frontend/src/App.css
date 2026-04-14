@@ -529,7 +529,42 @@ body::-webkit-scrollbar-thumb {
 }
 
 .blockchain-snapshot-grid {
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.blockchain-distribution-card {
+  margin-top: 4px;
+}
+
+.blockchain-distribution-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.blockchain-distribution-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 220, 156, 0.18);
+}
+
+.blockchain-distribution-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.blockchain-distribution-address {
+  flex: 1;
+}
+
+.blockchain-distribution-share {
+  flex-shrink: 0;
+  color: #fff0c9;
+  font-size: 1rem;
+  font-weight: 700;
 }
 
 .blockchain-toolbar {
