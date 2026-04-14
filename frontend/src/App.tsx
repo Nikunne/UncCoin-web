@@ -10,8 +10,11 @@ const BLOCKS_PER_BATCH = 25;
 const RECENT_BLOCK_STATS_WINDOW = 100;
 const CHART_WIDTH = 920;
 const CHART_HEIGHT = 352;
-const CHART_PADDING = 64;
-const CHART_TICK_COUNT = 6;
+const CHART_PADDING_LEFT = 78;
+const CHART_PADDING_RIGHT = 32;
+const CHART_PADDING_TOP = 28;
+const CHART_PADDING_BOTTOM = 76;
+const CHART_TICK_COUNT = 5;
 const CHART_Y_TICK_COUNT = 5;
 const WALLET_SESSION_KEY = "unc-wallet-address";
 const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1";
@@ -65,6 +68,94 @@ function getActivityTitle(activity: WalletActivityItem): string {
     }
 
     return "Received transaction";
+}
+
+function parseTimestampMs(timestamp: string | null): number {
+    if (!timestamp) {
+        return Number.NEGATIVE_INFINITY;
+    }
+
+    const value = new Date(timestamp).getTime();
+    return Number.isNaN(value) ? Number.NEGATIVE_INFINITY : value;
+}
+
+function buildWalletActivityFromBlockchain(
+    walletAddress: string,
+    chainData: BlockchainResponse | null,
+): WalletActivityItem[] {
+    if (!chainData) {
+        return [];
+    }
+
+    const activity: WalletActivityItem[] = [];
+
+    for (const block of chainData.blocks) {
+        let miningRewardRecorded = false;
+        let blockTimestamp: string | null = null;
+
+        for (const transaction of block.transactions) {
+            if (!blockTimestamp && transaction.timestamp) {
+                blockTimestamp = transaction.timestamp;
+            }
+
+            const amount = parseAmount(transaction.amount);
+            const fee = parseAmount(transaction.fee);
+
+            if (transaction.sender === walletAddress) {
+                activity.push({
+                    block_id: block.block_id,
+                    kind: "sent",
+                    sender: transaction.sender,
+                    receiver: transaction.receiver,
+                    amount,
+                    fee,
+                    timestamp: transaction.timestamp,
+                });
+            }
+
+            if (transaction.receiver === walletAddress) {
+                const isMinedReward = transaction.sender === "SYSTEM" && block.description === walletAddress;
+
+                activity.push({
+                    block_id: block.block_id,
+                    kind: isMinedReward ? "mined" : "received",
+                    sender: transaction.sender,
+                    receiver: transaction.receiver,
+                    amount,
+                    fee,
+                    timestamp: transaction.timestamp,
+                });
+
+                if (isMinedReward) {
+                    miningRewardRecorded = true;
+                }
+            }
+        }
+
+        if (block.description === walletAddress && !miningRewardRecorded) {
+            activity.push({
+                block_id: block.block_id,
+                kind: "mined",
+                sender: "SYSTEM",
+                receiver: walletAddress,
+                amount: 0,
+                fee: 0,
+                timestamp: blockTimestamp,
+            });
+        }
+    }
+
+    activity.sort((left, right) => {
+        const timestampDelta = parseTimestampMs(right.timestamp) - parseTimestampMs(left.timestamp);
+
+        if (timestampDelta !== 0) {
+            return timestampDelta;
+        }
+
+        return (right.block_id ?? -1) - (left.block_id ?? -1);
+    });
+
+    return activity;
 }
 
 function formatBlockShare(count: number, total: number): string {
@@ -329,7 +420,7 @@ function buildYAxisTicks(maxSupply: number): YAxisTick[] {
     return Array.from({ length: CHART_Y_TICK_COUNT }, (_, index) => {
         const ratio = index / (CHART_Y_TICK_COUNT - 1);
         const value = Math.round((1 - ratio) * maxSupply);
-        const y = CHART_PADDING + ratio * (CHART_HEIGHT - CHART_PADDING * 2);
+        const y = CHART_PADDING_TOP + ratio * (CHART_HEIGHT - CHART_PADDING_TOP - CHART_PADDING_BOTTOM);
 
         return { value, y };
     });
@@ -342,8 +433,8 @@ function buildXAxisTicks(minTimestamp: number, maxTimestamp: number): XAxisTick[
         return [
             {
                 value: minTimestamp,
-                x: CHART_PADDING,
-                dateLabel: parsed.toLocaleDateString(),
+                x: CHART_PADDING_LEFT,
+                dateLabel: parsed.toLocaleDateString([], { day: "2-digit", month: "2-digit" }),
                 timeLabel: parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             },
         ];
@@ -353,12 +444,14 @@ function buildXAxisTicks(minTimestamp: number, maxTimestamp: number): XAxisTick[
         const ratio = index / (CHART_TICK_COUNT - 1);
         const value = minTimestamp + ratio * (maxTimestamp - minTimestamp);
         const parsed = new Date(value);
-        const x = CHART_PADDING + ratio * (CHART_WIDTH - CHART_PADDING * 2);
+        const x =
+            CHART_PADDING_LEFT +
+            ratio * (CHART_WIDTH - CHART_PADDING_LEFT - CHART_PADDING_RIGHT);
 
         return {
             value,
             x,
-            dateLabel: parsed.toLocaleDateString(),
+            dateLabel: parsed.toLocaleDateString([], { day: "2-digit", month: "2-digit" }),
             timeLabel: parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         };
     });
@@ -628,8 +721,23 @@ function WalletDashboardPage() {
         const load = async () => {
             try {
                 const data = await getWalletSummary(walletAddress);
+                let nextWallet = data;
+
+                if (data.activity.length === 0 && data.transaction_count > 0) {
+                    const chainData = await getBlockchain();
+                    const derivedActivity = buildWalletActivityFromBlockchain(walletAddress, chainData);
+
+                    if (derivedActivity.length > 0) {
+                        nextWallet = {
+                            ...data,
+                            activity: derivedActivity,
+                            latest_activity: data.latest_activity ?? derivedActivity[0]?.timestamp ?? null,
+                        };
+                    }
+                }
+
                 if (active) {
-                    setWallet(data);
+                    setWallet(nextWallet);
                     setLastUpdated(new Date());
                     setErrorMessage("");
                 }
@@ -848,22 +956,22 @@ function StatPage() {
     const points = supplySeries.map((point) => {
         const x =
             minTimestamp === maxTimestamp
-                ? CHART_PADDING
-                : CHART_PADDING +
+                ? CHART_PADDING_LEFT
+                : CHART_PADDING_LEFT +
                   ((point.timestampMs - minTimestamp) / (maxTimestamp - minTimestamp)) *
-                      (CHART_WIDTH - CHART_PADDING * 2);
+                      (CHART_WIDTH - CHART_PADDING_LEFT - CHART_PADDING_RIGHT);
         const y =
             maxSupply === 0
-                ? CHART_HEIGHT - CHART_PADDING
+                ? CHART_HEIGHT - CHART_PADDING_BOTTOM
                 : CHART_HEIGHT -
-                  CHART_PADDING -
-                  (point.totalSupply / maxSupply) * (CHART_HEIGHT - CHART_PADDING * 2);
+                  CHART_PADDING_BOTTOM -
+                  (point.totalSupply / maxSupply) * (CHART_HEIGHT - CHART_PADDING_TOP - CHART_PADDING_BOTTOM);
         return { ...point, x, y };
     });
 
     const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
-    const xAxisY = CHART_HEIGHT - CHART_PADDING;
-    const yAxisX = CHART_PADDING;
+    const xAxisY = CHART_HEIGHT - CHART_PADDING_BOTTOM;
+    const yAxisX = CHART_PADDING_LEFT;
     const xAxisTicks = points.length > 0 ? buildXAxisTicks(minTimestamp, maxTimestamp) : [];
     const yAxisTicks = buildYAxisTicks(maxSupply);
 
@@ -923,10 +1031,20 @@ function StatPage() {
                                     role="img"
                                     aria-label="Line chart of total UncCoins in existence over time"
                                 >
+                                    <defs>
+                                        <clipPath id="stat-chart-clip">
+                                            <rect
+                                                x={CHART_PADDING_LEFT}
+                                                y={CHART_PADDING_TOP}
+                                                width={CHART_WIDTH - CHART_PADDING_LEFT - CHART_PADDING_RIGHT}
+                                                height={CHART_HEIGHT - CHART_PADDING_TOP - CHART_PADDING_BOTTOM}
+                                            />
+                                        </clipPath>
+                                    </defs>
                                     <line
                                         className="stat-axis"
                                         x1={yAxisX}
-                                        y1={CHART_PADDING}
+                                        y1={CHART_PADDING_TOP}
                                         x2={yAxisX}
                                         y2={xAxisY}
                                     />
@@ -934,15 +1052,15 @@ function StatPage() {
                                         className="stat-axis"
                                         x1={yAxisX}
                                         y1={xAxisY}
-                                        x2={CHART_WIDTH - CHART_PADDING}
+                                        x2={CHART_WIDTH - CHART_PADDING_RIGHT}
                                         y2={xAxisY}
                                     />
                                     <line
                                         className="stat-grid"
                                         x1={yAxisX}
-                                        y1={CHART_PADDING}
-                                        x2={CHART_WIDTH - CHART_PADDING}
-                                        y2={CHART_PADDING}
+                                        y1={CHART_PADDING_TOP}
+                                        x2={CHART_WIDTH - CHART_PADDING_RIGHT}
+                                        y2={CHART_PADDING_TOP}
                                     />
                                     {yAxisTicks.map((tick) => (
                                         <line
@@ -950,7 +1068,7 @@ function StatPage() {
                                             className="stat-grid"
                                             x1={yAxisX}
                                             y1={tick.y}
-                                            x2={CHART_WIDTH - CHART_PADDING}
+                                            x2={CHART_WIDTH - CHART_PADDING_RIGHT}
                                             y2={tick.y}
                                         />
                                     ))}
@@ -959,21 +1077,23 @@ function StatPage() {
                                             key={`grid-${tick.value}-${tick.x}`}
                                             className="stat-grid-vertical"
                                             x1={tick.x}
-                                            y1={CHART_PADDING}
+                                            y1={CHART_PADDING_TOP}
                                             x2={tick.x}
                                             y2={xAxisY}
                                         />
                                     ))}
-                                    <polyline className="stat-line" points={polylinePoints} />
-                                    {points.map((point) => (
-                                        <circle
-                                            key={`point-${point.timestamp}-${point.x}`}
-                                            className="stat-point"
-                                            cx={point.x}
-                                            cy={point.y}
-                                            r="3.5"
-                                        />
-                                    ))}
+                                    <g clipPath="url(#stat-chart-clip)">
+                                        <polyline className="stat-line" points={polylinePoints} />
+                                        {points.map((point, index) => (
+                                            <circle
+                                                key={`point-${point.timestamp}-${point.x}`}
+                                                className="stat-point"
+                                                cx={point.x}
+                                                cy={point.y}
+                                                r={index === points.length - 1 ? "4" : "2.1"}
+                                            />
+                                        ))}
+                                    </g>
                                     {yAxisTicks.map((tick) => (
                                         <text
                                             key={`y-label-${tick.value}-${tick.y}`}
@@ -989,13 +1109,13 @@ function StatPage() {
                                             key={`label-${tick.value}-${tick.x}`}
                                             className={`stat-label ${
                                                 index === 0
-                                                    ? ""
+                                                    ? "stat-label-start"
                                                     : index === xAxisTicks.length - 1
                                                       ? "stat-label-end"
                                                       : "stat-label-middle"
                                             }`}
                                             x={tick.x}
-                                            y={CHART_HEIGHT - 26}
+                                            y={CHART_HEIGHT - 32}
                                         >
                                             <tspan x={tick.x} dy="0">
                                                 {tick.dateLabel}

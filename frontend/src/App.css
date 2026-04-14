@@ -918,11 +918,14 @@ body::-webkit-scrollbar-thumb {
 
 .stat-chart-scroll {
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .stat-chart {
   display: block;
-  min-width: 100%;
+  width: 100%;
+  height: auto;
+  min-width: 780px;
 }
 
 .stat-axis {
@@ -936,23 +939,35 @@ body::-webkit-scrollbar-thumb {
   stroke-dasharray: 4 6;
 }
 
+.stat-grid-vertical {
+  stroke: rgba(255, 220, 156, 0.08);
+  stroke-width: 1;
+  stroke-dasharray: 3 8;
+}
+
 .stat-line {
   fill: none;
-  stroke: #ffe08b;
-  stroke-width: 3;
+  stroke: #e3a14d;
+  stroke-width: 2.4;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 .stat-point {
-  fill: #fff0c9;
+  fill: #ffe7b0;
   stroke: #8c5a2a;
-  stroke-width: 2;
+  stroke-width: 1.4;
+  opacity: 0.9;
 }
 
 .stat-label {
   fill: #f0d4a0;
-  font-size: 12px;
+  font-size: 11px;
+  letter-spacing: 0.03rem;
+}
+
+.stat-label-start {
+  text-anchor: start;
 }
 
 .stat-label-end {
