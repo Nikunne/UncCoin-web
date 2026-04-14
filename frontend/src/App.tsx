@@ -45,20 +45,6 @@ function formatTotalAmount(value: number): string {
     return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0";
 }
 
-function isToday(timestamp: string): boolean {
-    const parsed = new Date(timestamp);
-    if (Number.isNaN(parsed.getTime())) {
-        return false;
-    }
-
-    const now = new Date();
-    return (
-        parsed.getFullYear() === now.getFullYear() &&
-        parsed.getMonth() === now.getMonth() &&
-        parsed.getDate() === now.getDate()
-    );
-}
-
 function usePrevious<T>(value: T): T | undefined {
     const [previous, setPrevious] = useState<T>();
 
@@ -166,7 +152,7 @@ type PageScaffoldProps = {
 };
 
 function TopInvestmentTicker() {
-    const tickerItems = [...INVESTMENT_BANNER_TEXT, ...INVESTMENT_BANNER_TEXT];
+    const tickerItems = Array.from({ length: 12 }, () => INVESTMENT_BANNER_TEXT[0]);
 
     return (
         <a
@@ -910,7 +896,6 @@ function BlockchainPage() {
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [visibleBlocks, setVisibleBlocks] = useState(INITIAL_BLOCKS_VISIBLE);
     const [selectedAddress, setSelectedAddress] = useState("");
-    const [viewMode, setViewMode] = useState<"compact" | "today">("compact");
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [scrollToBottomRequested, setScrollToBottomRequested] = useState(false);
 
@@ -954,18 +939,10 @@ function BlockchainPage() {
               ),
           )
         : blocks;
-    const todayBlocks = filteredBlocks
-        .map((block) => ({
-            ...block,
-            transactions: block.transactions.filter((transaction) => isToday(transaction.timestamp)),
-        }))
-        .filter((block) => block.transactions.length > 0);
-    const blocksForView = viewMode === "today" ? todayBlocks : filteredBlocks;
-    const sortedBlocks = [...blocksForView].reverse();
+    const sortedBlocks = [...filteredBlocks].reverse();
     const recentBlocks = sortedBlocks.slice(0, visibleBlocks);
-    const latestBlock = blocksForView.at(-1);
+    const latestBlock = filteredBlocks.at(-1);
     const pendingTransactions = blockchain?.pending_transactions?.length ?? 0;
-    const todaysTransactions = todayBlocks.reduce((sum, block) => sum + block.transactions.length, 0);
 
     useEffect(() => {
         setVisibleBlocks((current) => {
@@ -978,11 +955,17 @@ function BlockchainPage() {
     }, [filteredBlocks.length]);
 
     useEffect(() => {
+        let lastScrollY = window.scrollY;
+
         const onScroll = () => {
-            setShowScrollTop(window.scrollY > 320);
+            const currentScrollY = window.scrollY;
+            const isScrollingUp = currentScrollY < lastScrollY;
+
+            setShowScrollTop(isScrollingUp && currentScrollY > 320);
+            lastScrollY = currentScrollY;
 
             const nearBottom =
-                window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300;
+                window.innerHeight + currentScrollY >= document.documentElement.scrollHeight - 300;
 
             if (!nearBottom) {
                 return;
@@ -1048,14 +1031,13 @@ function BlockchainPage() {
                     { to: "/blockchain", label: "Blockchain", active: true },
                     { to: "/stat", label: "Stats" },
                     { to: "/login", label: "Login", kind: "login" },
-                    { label: "Bottom", onClick: scrollToBottom },
                 ]}
             />
             <header className="masthead masthead-left">
                 <p className="masthead-kicker">Chain View</p>
                 <h1 className="balances-title">UncCoin Blockchain</h1>
                 <p className="masthead-subtitle">
-                    Current chain state in a tighter layout, with a quick switch to today&apos;s on-chain activity.
+                    Current chain state in a denser blockchain-only layout.
                 </p>
             </header>
 
@@ -1100,37 +1082,10 @@ function BlockchainPage() {
                     </button>
                 </div>
 
-                <div className="blockchain-view-switch" role="tablist" aria-label="Blockchain view mode">
-                    <button
-                        className={`blockchain-view-button ${viewMode === "compact" ? "blockchain-view-button-active" : ""}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={viewMode === "compact"}
-                        onClick={() => {
-                            setViewMode("compact");
-                            setScrollToBottomRequested(false);
-                        }}
-                    >
-                        Compact
-                    </button>
-                    <button
-                        className={`blockchain-view-button ${viewMode === "today" ? "blockchain-view-button-active" : ""}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={viewMode === "today"}
-                        onClick={() => {
-                            setViewMode("today");
-                            setScrollToBottomRequested(false);
-                        }}
-                    >
-                        Today
-                    </button>
-                </div>
-
                 <div className="chain-stats">
                     <article className="chain-stat-card">
                         <span className="chain-stat-label">Blocks</span>
-                        <strong className="chain-stat-value">{blocksForView.length}</strong>
+                        <strong className="chain-stat-value">{filteredBlocks.length}</strong>
                     </article>
                     <article className="chain-stat-card">
                         <span className="chain-stat-label">Latest Block</span>
@@ -1141,24 +1096,20 @@ function BlockchainPage() {
                         <strong className="chain-stat-value">{blockchain?.difficulty_bits ?? "-"}</strong>
                     </article>
                     <article className="chain-stat-card">
-                        <span className="chain-stat-label">{viewMode === "today" ? "Today Tx" : "Pending Tx"}</span>
-                        <strong className="chain-stat-value">
-                            {viewMode === "today" ? todaysTransactions : pendingTransactions}
-                        </strong>
+                        <span className="chain-stat-label">Pending Tx</span>
+                        <strong className="chain-stat-value">{pendingTransactions}</strong>
                     </article>
                 </div>
 
-                <div className="chain-wallet-card">
-                    <span className="chain-stat-label">Wallet Address</span>
-                    <code className="chain-wallet-value">{blockchain?.wallet_address ?? "loading..."}</code>
+                <div className="blockchain-utility-bar">
+                    <button className="blockchain-utility-button" type="button" onClick={scrollToBottom}>
+                        Scroll to bottom
+                    </button>
                 </div>
 
                 <div className="block-list">
                     {recentBlocks.map((block) => (
-                        <article
-                            key={`${viewMode}-${block.block_id}`}
-                            className={`block-card ${viewMode === "compact" ? "block-card-compact" : ""}`}
-                        >
+                        <article key={block.block_id} className="block-card block-card-compact">
                             <div className="block-card-header">
                                 <div>
                                     <p className="block-id">Block #{block.block_id}</p>
@@ -1170,7 +1121,7 @@ function BlockchainPage() {
                                 </div>
                             </div>
 
-                            <div className={`hash-grid ${viewMode === "compact" ? "hash-grid-compact" : ""}`}>
+                            <div className="hash-grid hash-grid-compact">
                                 <div>
                                     <span className="hash-label">Hash</span>
                                     <code className="hash-value" title={block.block_hash}>
@@ -1192,25 +1143,25 @@ function BlockchainPage() {
                                     block.transactions.map((transaction, index) => (
                                         <div
                                             key={`${block.block_id}-${transaction.timestamp}-${index}`}
-                                            className={`transaction-row ${viewMode === "compact" ? "transaction-row-compact" : ""}`}
+                                            className="transaction-row transaction-row-compact"
                                         >
                                             <div>
                                                 <span className="hash-label">From</span>
                                                 <code className="hash-value" title={transaction.sender}>
-                                                    {truncateHash(transaction.sender)}
+                                                    {transaction.sender}
                                                 </code>
                                             </div>
                                             <div>
                                                 <span className="hash-label">To</span>
                                                 <code className="hash-value" title={transaction.receiver}>
-                                                    {truncateHash(transaction.receiver)}
+                                                    {transaction.receiver}
                                                 </code>
                                             </div>
                                             <div>
                                                 <span className="hash-label">Amount</span>
                                                 <span className="transaction-amount">
                                                     {transaction.amount}
-                                                    {viewMode === "compact" && transaction.fee !== "0"
+                                                    {transaction.fee !== "0"
                                                         ? ` (+${transaction.fee} fee)`
                                                         : ""}
                                                 </span>
@@ -1230,11 +1181,7 @@ function BlockchainPage() {
                 </div>
 
                 {sortedBlocks.length === 0 ? (
-                    <p className="empty-state">
-                        {viewMode === "today"
-                            ? "No blockchain transactions were recorded today."
-                            : "No blocks match the current filter."}
-                    </p>
+                    <p className="empty-state">No blocks match the current filter.</p>
                 ) : null}
 
                 {visibleBlocks < sortedBlocks.length ? (

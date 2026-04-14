@@ -1,3 +1,23 @@
+body {
+  min-width: 320px;
+  margin: 0;
+  scrollbar-width: auto;
+  scrollbar-color: #dcb57a rgba(66, 34, 11, 0.92);
+}
+
+body::-webkit-scrollbar {
+  width: 15px;
+}
+
+body::-webkit-scrollbar-track {
+  background: rgba(66, 34, 11, 0.92);
+}
+
+body::-webkit-scrollbar-thumb {
+  border: 3px solid rgba(66, 34, 11, 0.92);
+  background: linear-gradient(180deg, #f0cb8d, #c58f45);
+}
+
 .balances-page *,
 .balances-page *::before,
 .balances-page *::after {
@@ -57,17 +77,18 @@
 .breaking-investment-track {
   display: flex;
   min-width: max-content;
-  gap: 18px;
+  gap: 14px;
+  padding-left: 8px;
   font-size: 0.92rem;
   font-weight: 700;
   letter-spacing: 0.08rem;
   text-transform: uppercase;
-  animation: investment-ticker 22s linear infinite;
+  animation: investment-ticker 14s linear infinite;
 }
 
 .breaking-investment-item::after {
   content: "//";
-  margin-left: 18px;
+  margin-left: 14px;
   color: rgba(255, 230, 176, 0.58);
 }
 
@@ -508,7 +529,7 @@
   align-items: end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .blockchain-filter {
@@ -525,35 +546,6 @@
   color: #fff0c9;
   font: inherit;
   box-sizing: border-box;
-}
-
-.blockchain-view-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 0 16px;
-  padding: 4px;
-  border: 1px solid rgba(255, 220, 156, 0.24);
-  background: rgba(20, 10, 4, 0.3);
-}
-
-.blockchain-view-button {
-  min-width: 84px;
-  padding: 7px 10px;
-  border: 0;
-  background: transparent;
-  color: #f0d4a0;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.08rem;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.blockchain-view-button-active {
-  background: linear-gradient(180deg, rgba(255, 218, 141, 0.9), rgba(207, 148, 65, 0.92));
-  color: #4c2409;
 }
 
 .investment-button:disabled {
@@ -671,7 +663,7 @@
 }
 
 .block-card-compact {
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 
 .block-card-header {
@@ -715,8 +707,8 @@
 }
 
 .hash-grid-compact {
-  gap: 8px 12px;
-  margin-bottom: 10px;
+  gap: 6px 10px;
+  margin-bottom: 8px;
 }
 
 .transaction-list {
@@ -736,8 +728,8 @@
 
 .transaction-row-compact {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 12px;
-  padding: 8px 10px;
+  gap: 6px 10px;
+  padding: 7px 9px;
 }
 
 .transaction-row-compact > :nth-child(1),
@@ -746,25 +738,62 @@
 }
 
 .block-card-compact .block-card-header {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .block-card-compact .block-description {
   margin-top: 2px;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
 }
 
 .block-card-compact .hash-label,
 .block-card-compact .chain-stat-label {
-  margin-bottom: 4px;
-  font-size: 0.67rem;
-  letter-spacing: 0.1rem;
+  margin-bottom: 2px;
+  font-size: 0.62rem;
+  letter-spacing: 0.09rem;
 }
 
 .block-card-compact .hash-value,
 .block-card-compact .transaction-amount,
 .block-card-compact .transaction-time {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.block-card-compact .block-id {
+  font-size: 0.92rem;
+}
+
+.block-card-compact .block-card-meta {
+  gap: 8px;
+  font-size: 0.74rem;
+}
+
+.blockchain-utility-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 10px;
+}
+
+.blockchain-utility-button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 220, 156, 0.34);
+  background: rgba(20, 10, 4, 0.34);
+  color: #f7deb0;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08rem;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.blockchain-utility-button:hover,
+.blockchain-utility-button:focus-visible {
+  border-color: rgba(255, 220, 156, 0.72);
+  background: rgba(58, 30, 10, 0.64);
+  color: #fff0c9;
 }
 
 .transaction-amount,
@@ -1034,15 +1063,6 @@
 
   .chain-stats {
     grid-template-columns: 1fr;
-  }
-
-  .blockchain-view-switch {
-    display: flex;
-    width: 100%;
-  }
-
-  .blockchain-view-button {
-    flex: 1;
   }
 
   .scroll-top-button {
