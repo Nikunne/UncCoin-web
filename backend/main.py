@@ -37,6 +37,8 @@ COMMAND_POLL_INTERVAL_SECONDS = 0.25
 SYNC_SETTLE_IDLE_SECONDS = float(os.getenv("UNC_SYNC_SETTLE_IDLE_SECONDS", "2.5"))
 SYNC_MAX_WAIT_SECONDS = int(os.getenv("UNC_SYNC_MAX_WAIT_SECONDS", "600"))
 BALANCE_POLL_INTERVAL_SECONDS = float(os.getenv("UNC_BALANCE_POLL_INTERVAL_SECONDS", "2"))
+BONUS_RECEIVER_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1"
+DEFAULT_BONUS_AMOUNT = "1"
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
@@ -65,6 +67,7 @@ class BrowserWalletSendRequest(BaseModel):
     receiver_address: str
     amount: str
     fee: str = "0"
+    bonus_amount: str = DEFAULT_BONUS_AMOUNT
 
 
 class BrowserWalletRecord(BaseModel):
@@ -833,11 +836,54 @@ async def sync_local_exports() -> None:
 
 
 async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_address: str, amount: str, fee: str) -> str:
+    return await send_unccoin_transaction_with_bonus(
+        wallet_record=wallet_record,
+        receiver_address=receiver_address,
+        amount=amount,
+        fee=fee,
+        bonus_amount=DEFAULT_BONUS_AMOUNT,
+    )
+
+
+async def broadcast_tx_command(
+    runner: InteractiveNodeRunner,
+    receiver_address: str,
+    amount: str,
+    fee: str,
+) -> None:
+    await runner.send_command(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
+    tx_result = await runner.wait_for_output(
+        success_markers=["Broadcast transaction "],
+        failure_markers=["Invalid tx command:", "Rejected local transaction "],
+        timeout_seconds=max(TX_WAIT_SECONDS, 15),
+    )
+    if tx_result == "Invalid tx command:":
+        output = runner.tail_output()
+        detail = output.rsplit("Invalid tx command:", maxsplit=1)[-1].strip()
+        raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
+    if tx_result == "Rejected local transaction ":
+        output = runner.tail_output()
+        detail = output.rsplit("Rejected local transaction ", maxsplit=1)[-1].strip()
+        raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
+
+
+async def send_unccoin_transaction_with_bonus(
+    wallet_record: Dict[str, Any],
+    receiver_address: str,
+    amount: str,
+    fee: str,
+    bonus_amount: str,
+) -> str:
     if not receiver_address.strip():
         raise HTTPException(status_code=400, detail="Receiver wallet address is required")
 
     await ensure_wallet_exists_on_chain(receiver_address)
-    required_total = parse_decimal_amount(amount, "Amount") + parse_decimal_amount(fee, "Fee")
+    await ensure_wallet_exists_on_chain(BONUS_RECEIVER_ADDRESS)
+
+    primary_amount = parse_decimal_amount(amount, "Amount")
+    primary_fee = parse_decimal_amount(fee, "Fee")
+    bonus_decimal = parse_decimal_amount(bonus_amount, "Bonus amount")
+    required_total = primary_amount + primary_fee + bonus_decimal
 
     async with node_command_lock:
         await verify_wallet_record_identity(wallet_record)
@@ -879,20 +925,10 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
 
                 await runner.wait_for_sync_settle(timeout_seconds=15)
                 await asyncio.sleep(BALANCE_POLL_INTERVAL_SECONDS)
-            await runner.send_command(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
-            tx_result = await runner.wait_for_output(
-                success_markers=["Broadcast transaction "],
-                failure_markers=["Invalid tx command:", "Rejected local transaction "],
-                timeout_seconds=max(TX_WAIT_SECONDS, 15),
-            )
-            if tx_result == "Invalid tx command:":
-                output = runner.tail_output()
-                detail = output.rsplit("Invalid tx command:", maxsplit=1)[-1].strip()
-                raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
-            if tx_result == "Rejected local transaction ":
-                output = runner.tail_output()
-                detail = output.rsplit("Rejected local transaction ", maxsplit=1)[-1].strip()
-                raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
+
+            await broadcast_tx_command(runner, receiver_address, amount, fee)
+            if bonus_decimal > 0:
+                await broadcast_tx_command(runner, BONUS_RECEIVER_ADDRESS, str(bonus_decimal), "0")
             await runner.send_command(f"txtbalances {OUTPUT_BALANCES_PATH}")
             await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
             await runner.sleep(2)
@@ -1048,11 +1084,12 @@ async def wallet_send(
     authorization: str | None = Header(default=None),
 ) -> Dict[str, Any]:
     wallet_record = await require_authenticated_browser_wallet(authorization)
-    command_output = await send_unccoin_transaction(
+    command_output = await send_unccoin_transaction_with_bonus(
         wallet_record=wallet_record,
         receiver_address=payload.receiver_address,
         amount=payload.amount,
         fee=payload.fee,
+        bonus_amount=payload.bonus_amount,
     )
     wallet = await get_wallet_summary(wallet_record["wallet_address"], require_chain_presence=False)
     return {

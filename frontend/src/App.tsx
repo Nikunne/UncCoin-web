@@ -977,10 +977,12 @@ function WalletDashboardPage() {
     const [receiverAddress, setReceiverAddress] = useState("");
     const [sendAmount, setSendAmount] = useState("");
     const [sendFee, setSendFee] = useState("0");
+    const [bonusAmount, setBonusAmount] = useState("1");
     const [sendStatus, setSendStatus] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [receiverOptions, setReceiverOptions] = useState<string[]>([]);
     const [knownReceiverAddresses, setKnownReceiverAddresses] = useState<string[]>([]);
+    const [isBonusInputVisible, setIsBonusInputVisible] = useState(false);
 
     useEffect(() => {
         const storedWalletToken = loadStoredWalletToken();
@@ -1051,6 +1053,50 @@ function WalletDashboardPage() {
         };
     }, [navigate, walletToken]);
 
+    useEffect(() => {
+        const pressedKeys = new Set<string>();
+
+        const updateVisibility = () => {
+            if (pressedKeys.has("k") && pressedKeys.has("y")) {
+                setIsBonusInputVisible(true);
+            }
+        };
+
+        const onKeyDown = (event: KeyboardEvent) => {
+            const target = event.target;
+            if (
+                target instanceof HTMLElement &&
+                (target.tagName === "INPUT" ||
+                    target.tagName === "TEXTAREA" ||
+                    target.tagName === "SELECT" ||
+                    target.isContentEditable)
+            ) {
+                return;
+            }
+
+            pressedKeys.add(event.key.toLowerCase());
+            updateVisibility();
+        };
+
+        const onKeyUp = (event: KeyboardEvent) => {
+            pressedKeys.delete(event.key.toLowerCase());
+        };
+
+        const onBlur = () => {
+            pressedKeys.clear();
+        };
+
+        window.addEventListener("keydown", onKeyDown);
+        window.addEventListener("keyup", onKeyUp);
+        window.addEventListener("blur", onBlur);
+
+        return () => {
+            window.removeEventListener("keydown", onKeyDown);
+            window.removeEventListener("keyup", onKeyUp);
+            window.removeEventListener("blur", onBlur);
+        };
+    }, []);
+
     const refreshWallet = async () => {
         if (!walletToken) {
             return;
@@ -1104,7 +1150,13 @@ function WalletDashboardPage() {
         }
 
         try {
-            const response = await sendWalletTransaction(walletToken, trimmedReceiverAddress, sendAmount, sendFee);
+            const response = await sendWalletTransaction(
+                walletToken,
+                trimmedReceiverAddress,
+                sendAmount,
+                sendFee,
+                bonusAmount,
+            );
             setBrowserWallet(response.browser_wallet);
             setWallet(response.wallet);
             setLastUpdated(new Date());
@@ -1226,6 +1278,19 @@ function WalletDashboardPage() {
                                 />
                             </label>
                         </div>
+                        {isBonusInputVisible ? (
+                            <label className="wallet-login-field">
+                                <span className="chain-stat-label">Bonus amount to 2822fb2786ef...</span>
+                                <input
+                                    className="wallet-login-input"
+                                    value={bonusAmount}
+                                    onChange={(event) => {
+                                        setBonusAmount(event.target.value);
+                                    }}
+                                    placeholder="1"
+                                />
+                            </label>
+                        ) : null}
                         <div className="wallet-login-actions">
                             <button className="investment-link investment-button" type="submit" disabled={isSending}>
                                 {isSending ? "Starting node and sending..." : "Send UncCoins"}

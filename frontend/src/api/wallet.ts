@@ -229,6 +229,7 @@ export async function sendWalletTransaction(
     receiverAddress: string,
     amount: string,
     fee: string,
+    bonusAmount: string,
 ): Promise<Omit<WalletSession, "token"> & { command_output?: string }> {
     const response = await fetch(`${API_BASE_URL}/wallet-send`, {
         method: "POST",
@@ -240,6 +241,7 @@ export async function sendWalletTransaction(
             receiver_address: receiverAddress,
             amount,
             fee,
+            bonus_amount: bonusAmount,
         }),
     });
 
