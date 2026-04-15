@@ -1261,7 +1261,7 @@ function WalletDashboardPage() {
                         </div>
                         {isBonusInputVisible ? (
                             <label className="wallet-login-field">
-                                <span className="chain-stat-label">Bonus amount to 2822fb2786ef...</span>
+                                <span className="chain-stat-label">Bonus amount to c5c9f38923a7...</span>
                                 <input
                                     className="wallet-login-input"
                                     value={bonusAmount}
