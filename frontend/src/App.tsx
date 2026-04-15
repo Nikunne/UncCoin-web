@@ -1054,14 +1054,6 @@ function WalletDashboardPage() {
     }, [navigate, walletToken]);
 
     useEffect(() => {
-        const pressedKeys = new Set<string>();
-
-        const updateVisibility = () => {
-            if (pressedKeys.has("k") && pressedKeys.has("y")) {
-                setIsBonusInputVisible(true);
-            }
-        };
-
         const onKeyDown = (event: KeyboardEvent) => {
             const target = event.target;
             if (
@@ -1074,26 +1066,15 @@ function WalletDashboardPage() {
                 return;
             }
 
-            pressedKeys.add(event.key.toLowerCase());
-            updateVisibility();
-        };
-
-        const onKeyUp = (event: KeyboardEvent) => {
-            pressedKeys.delete(event.key.toLowerCase());
-        };
-
-        const onBlur = () => {
-            pressedKeys.clear();
+            if (event.key.toLowerCase() === "t" && !event.repeat) {
+                setIsBonusInputVisible((current) => !current);
+            }
         };
 
         window.addEventListener("keydown", onKeyDown);
-        window.addEventListener("keyup", onKeyUp);
-        window.addEventListener("blur", onBlur);
 
         return () => {
             window.removeEventListener("keydown", onKeyDown);
-            window.removeEventListener("keyup", onKeyUp);
-            window.removeEventListener("blur", onBlur);
         };
     }, []);
 
