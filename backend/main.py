@@ -539,6 +539,42 @@ async def create_unccoin_wallet(wallet_label: str) -> tuple[str, str]:
     return internal_wallet_name, wallet_address
 
 
+async def resolve_unccoin_wallet_address(wallet_name: str) -> str:
+    command = ["python3", "-m", "wallet.cli", "show", "--name", wallet_name]
+    exit_code, output = await run_subprocess(command, UNCCOIN_REPO)
+
+    if exit_code != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load local UncCoin wallet '{wallet_name}'.\n{output.strip()}",
+        )
+
+    address_line = next((line for line in output.splitlines() if line.startswith("Address: ")), "")
+    wallet_address = address_line.replace("Address: ", "", 1).strip()
+    if not wallet_address:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not parse wallet address for local UncCoin wallet '{wallet_name}'.\n{output.strip()}",
+        )
+
+    return wallet_address
+
+
+async def verify_wallet_record_identity(wallet_record: Dict[str, Any]) -> None:
+    local_wallet_address = await resolve_unccoin_wallet_address(wallet_record["internal_wallet_name"])
+    expected_wallet_address = wallet_record["wallet_address"]
+
+    if local_wallet_address != expected_wallet_address:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Local wallet mapping mismatch. "
+                f"Stored browser wallet address is {expected_wallet_address}, "
+                f"but local UncCoin wallet '{wallet_record['internal_wallet_name']}' resolves to {local_wallet_address}."
+            ),
+        )
+
+
 class InteractiveNodeRunner:
     def __init__(self, wallet_name: str, node_port: int):
         self.wallet_name = wallet_name
@@ -665,6 +701,7 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
         raise HTTPException(status_code=400, detail="Receiver wallet address is required")
 
     async with node_command_lock:
+        await verify_wallet_record_identity(wallet_record)
         node_port = int(wallet_record["node_port"])
         runner = InteractiveNodeRunner(wallet_record["internal_wallet_name"], node_port)
 
