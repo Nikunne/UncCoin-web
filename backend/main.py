@@ -291,6 +291,23 @@ async def get_wallet_summary(wallet_address: str, require_chain_presence: bool =
     return build_wallet_stats(wallet_address, balance or 0.0, chain_data)
 
 
+async def ensure_wallet_exists_on_chain(wallet_address: str) -> None:
+    normalized_address = wallet_address.strip()
+    if not normalized_address:
+        raise HTTPException(status_code=400, detail="Receiver wallet address is required")
+
+    async with blockchain_lock:
+        chain_data = dict(blockchain)
+
+    if not chain_data:
+        await load_blockchain_once()
+        async with blockchain_lock:
+            chain_data = dict(blockchain)
+
+    if normalized_address not in collect_wallet_addresses(chain_data):
+        raise HTTPException(status_code=400, detail="Receiver wallet address does not exist on-chain")
+
+
 def parse_decimal_amount(value: str, field_name: str) -> Decimal:
     try:
         parsed = Decimal(value.strip())
@@ -819,6 +836,7 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
     if not receiver_address.strip():
         raise HTTPException(status_code=400, detail="Receiver wallet address is required")
 
+    await ensure_wallet_exists_on_chain(receiver_address)
     required_total = parse_decimal_amount(amount, "Amount") + parse_decimal_amount(fee, "Fee")
 
     async with node_command_lock:

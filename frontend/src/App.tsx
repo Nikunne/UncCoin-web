@@ -181,10 +181,9 @@ function collectKnownWalletAddresses(chainData: BlockchainResponse | null): stri
     const knownWalletAddresses = new Set(
         [
             chainData.wallet_address ?? "",
-            ...chainData.blocks.flatMap((block) => [
-                block.description,
-                ...block.transactions.flatMap((transaction) => [transaction.sender, transaction.receiver]),
-            ]),
+            ...chainData.blocks.flatMap((block) =>
+                block.transactions.flatMap((transaction) => [transaction.sender, transaction.receiver]),
+            ),
         ].filter((address) => address.trim().length > 0 && address !== "SYSTEM"),
     );
 
@@ -981,6 +980,7 @@ function WalletDashboardPage() {
     const [sendStatus, setSendStatus] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [receiverOptions, setReceiverOptions] = useState<string[]>([]);
+    const [knownReceiverAddresses, setKnownReceiverAddresses] = useState<string[]>([]);
 
     useEffect(() => {
         const storedWalletToken = loadStoredWalletToken();
@@ -1005,7 +1005,8 @@ function WalletDashboardPage() {
                 const session = await getWalletSession(walletToken);
                 const chainData = await getBlockchain();
                 let nextWallet = session.wallet;
-                const knownAddresses = collectKnownWalletAddresses(chainData).filter(
+                const allKnownAddresses = collectKnownWalletAddresses(chainData);
+                const knownAddresses = allKnownAddresses.filter(
                     (address) => address !== session.wallet.wallet_address,
                 );
 
@@ -1025,6 +1026,7 @@ function WalletDashboardPage() {
                     setBrowserWallet(session.browser_wallet);
                     setWallet(nextWallet);
                     setReceiverOptions(knownAddresses);
+                    setKnownReceiverAddresses(allKnownAddresses);
                     setLastUpdated(new Date());
                     setErrorMessage("");
                 }
@@ -1056,11 +1058,11 @@ function WalletDashboardPage() {
 
         const session = await getWalletSession(walletToken);
         const chainData = await getBlockchain();
+        const allKnownAddresses = collectKnownWalletAddresses(chainData);
         setBrowserWallet(session.browser_wallet);
         setWallet(session.wallet);
-        setReceiverOptions(
-            collectKnownWalletAddresses(chainData).filter((address) => address !== session.wallet.wallet_address),
-        );
+        setKnownReceiverAddresses(allKnownAddresses);
+        setReceiverOptions(allKnownAddresses.filter((address) => address !== session.wallet.wallet_address));
         setLastUpdated(new Date());
         setErrorMessage("");
     };
@@ -1088,8 +1090,21 @@ function WalletDashboardPage() {
         setSendStatus("");
         setErrorMessage("");
 
+        const trimmedReceiverAddress = receiverAddress.trim();
+        if (!trimmedReceiverAddress) {
+            setErrorMessage("Receiver address is required");
+            setIsSending(false);
+            return;
+        }
+
+        if (!knownReceiverAddresses.includes(trimmedReceiverAddress)) {
+            setErrorMessage("Receiver address does not exist on-chain");
+            setIsSending(false);
+            return;
+        }
+
         try {
-            const response = await sendWalletTransaction(walletToken, receiverAddress, sendAmount, sendFee);
+            const response = await sendWalletTransaction(walletToken, trimmedReceiverAddress, sendAmount, sendFee);
             setBrowserWallet(response.browser_wallet);
             setWallet(response.wallet);
             setLastUpdated(new Date());
