@@ -2,7 +2,16 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
 import { getBlockchain, type BlockchainBlock, type BlockchainResponse } from "./api/blockchain";
-import { getWalletSummary, loginWithWallet, type WalletActivityItem, type WalletSummary } from "./api/wallet";
+import {
+    createBrowserWallet,
+    getWalletSession,
+    loginWithWallet,
+    logoutWalletSession,
+    sendWalletTransaction,
+    type BrowserWallet,
+    type WalletActivityItem,
+    type WalletSummary,
+} from "./api/wallet";
 import "./App.css";
 
 const INITIAL_BLOCKS_VISIBLE = 25;
@@ -16,12 +25,18 @@ const CHART_PADDING_TOP = 28;
 const CHART_PADDING_BOTTOM = 76;
 const CHART_TICK_COUNT = 5;
 const CHART_Y_TICK_COUNT = 5;
-const WALLET_SESSION_KEY = "unc-wallet-address";
+const WALLET_SESSION_TOKEN_KEY = "unc-wallet-session-token";
+const WALLET_SESSION_META_KEY = "unc-wallet-session-meta";
 const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1";
 const SECONDARY_WALLET_ADDRESS = "fe269f427a5ad619ce480192db583a29a7ce4098b22111d9b7216e2fee6bc964";
 const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
 const HEI_FREDERIK_PATTERN = /heifrederik\d*/i;
 const WINDOWS_PATTERN = /windows/i;
+
+type StoredWalletSessionMeta = {
+    wallet_address: string;
+    wallet_name: string;
+};
 
 function formatTimestamp(timestamp: string): string {
     const parsed = new Date(timestamp);
@@ -245,12 +260,62 @@ function buildSupplySeries(blocks: BlockchainBlock[]): SupplyPoint[] {
     return series;
 }
 
-function loadStoredWalletAddress(): string {
+function loadStoredWalletToken(): string {
     if (typeof window === "undefined") {
         return "";
     }
 
-    return window.localStorage.getItem(WALLET_SESSION_KEY) ?? "";
+    return window.localStorage.getItem(WALLET_SESSION_TOKEN_KEY) ?? "";
+}
+
+function loadStoredWalletMeta(): BrowserWallet | null {
+    if (typeof window === "undefined") {
+        return null;
+    }
+
+    const rawValue = window.localStorage.getItem(WALLET_SESSION_META_KEY);
+    if (!rawValue) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(rawValue) as Partial<StoredWalletSessionMeta>;
+        if (typeof parsed.wallet_address === "string" && typeof parsed.wallet_name === "string") {
+            return {
+                wallet_address: parsed.wallet_address,
+                wallet_name: parsed.wallet_name,
+                created_at: "",
+            };
+        }
+    } catch (error) {
+        console.error(error);
+    }
+
+    return null;
+}
+
+function persistWalletSession(token: string, browserWallet: BrowserWallet): void {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    window.localStorage.setItem(WALLET_SESSION_TOKEN_KEY, token);
+    window.localStorage.setItem(
+        WALLET_SESSION_META_KEY,
+        JSON.stringify({
+            wallet_address: browserWallet.wallet_address,
+            wallet_name: browserWallet.wallet_name,
+        } satisfies StoredWalletSessionMeta),
+    );
+}
+
+function clearWalletSession(): void {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    window.localStorage.removeItem(WALLET_SESSION_TOKEN_KEY);
+    window.localStorage.removeItem(WALLET_SESSION_META_KEY);
 }
 
 type YAxisTick = {
@@ -406,7 +471,7 @@ function PageNav({ items }: { items: NavItem[] }) {
 }
 
 function buildPrimaryNavItems(activePage: PrimaryPage): NavItem[] {
-    const isLoggedIn = Boolean(loadStoredWalletAddress());
+    const isLoggedIn = Boolean(loadStoredWalletToken());
     const walletLabel = isLoggedIn ? "My Wallet" : "Login";
     const walletTarget = isLoggedIn ? "/wallet" : "/login";
 
@@ -546,13 +611,11 @@ function buildXAxisTicks(minTimestamp: number, maxTimestamp: number): XAxisTick[
 }
 
 function HomePage() {
-    const navigate = useNavigate();
     const [balances, setBalances] = useState<BalanceRow[]>([]);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [copiedUser, setCopiedUser] = useState<string | null>(null);
     const [copiedToast, setCopiedToast] = useState<string | null>(null);
     const [isCopyToastVisible, setIsCopyToastVisible] = useState(false);
-    const [isRShortcutPressed, setIsRShortcutPressed] = useState(false);
     const totalUncCoins = balances.reduce((sum, [, amount]) => sum + amount, 0);
 
     useEffect(() => {
@@ -583,34 +646,6 @@ function HomePage() {
         };
     }, []);
 
-    useEffect(() => {
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key.toLowerCase() === "r" && !event.repeat) {
-                setIsRShortcutPressed(true);
-            }
-        };
-
-        const onKeyUp = (event: KeyboardEvent) => {
-            if (event.key.toLowerCase() === "r") {
-                setIsRShortcutPressed(false);
-            }
-        };
-
-        const resetShortcut = () => {
-            setIsRShortcutPressed(false);
-        };
-
-        window.addEventListener("keydown", onKeyDown);
-        window.addEventListener("keyup", onKeyUp);
-        window.addEventListener("blur", resetShortcut);
-
-        return () => {
-            window.removeEventListener("keydown", onKeyDown);
-            window.removeEventListener("keyup", onKeyUp);
-            window.removeEventListener("blur", resetShortcut);
-        };
-    }, []);
-
     const copyAddress = async (user: string) => {
         try {
             await navigator.clipboard.writeText(user);
@@ -629,20 +664,6 @@ function HomePage() {
         } catch (error) {
             console.error(error);
         }
-    };
-
-    const openWalletDashboard = (user: string) => {
-        window.localStorage.setItem(WALLET_SESSION_KEY, user);
-        navigate("/wallet");
-    };
-
-    const handleBalanceAddressClick = (user: string) => {
-        if (isRShortcutPressed) {
-            openWalletDashboard(user);
-            return;
-        }
-
-        void copyAddress(user);
     };
 
     return (
@@ -693,13 +714,9 @@ function HomePage() {
                                 className={getWalletAddressClassName("balance-user", user)}
                                 type="button"
                                 onClick={() => {
-                                    handleBalanceAddressClick(user);
+                                    void copyAddress(user);
                                 }}
-                                title={
-                                    isRShortcutPressed
-                                        ? `Open wallet dashboard for ${user}`
-                                        : `Copy ${user} or hold R and click to open wallet`
-                                }
+                                title={`Copy ${user}`}
                             >
                                 {user}
                             </button>
@@ -738,30 +755,57 @@ function HomePage() {
 function LoginPage() {
     const navigate = useNavigate();
     const [walletAddress, setWalletAddress] = useState("");
-    const [password, setPassword] = useState("1234");
+    const [password, setPassword] = useState("");
+    const [newWalletName, setNewWalletName] = useState("");
+    const [newWalletPassword, setNewWalletPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [createErrorMessage, setCreateErrorMessage] = useState("");
+    const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
+    const [isCreateSubmitting, setIsCreateSubmitting] = useState(false);
 
     useEffect(() => {
-        const storedWalletAddress = loadStoredWalletAddress();
-        if (storedWalletAddress) {
+        const storedWalletToken = loadStoredWalletToken();
+        if (storedWalletToken) {
             navigate("/wallet", { replace: true });
         }
     }, [navigate]);
 
-    const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    const onLoginSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setErrorMessage("");
-        setIsSubmitting(true);
+        setIsLoginSubmitting(true);
 
         try {
-            const wallet = await loginWithWallet(walletAddress, password);
-            window.localStorage.setItem(WALLET_SESSION_KEY, wallet.wallet_address);
+            const session = await loginWithWallet(walletAddress, password);
+            persistWalletSession(session.token, session.browser_wallet);
             navigate("/wallet");
         } catch (error) {
             setErrorMessage(error instanceof Error ? error.message : "Failed to log in");
         } finally {
-            setIsSubmitting(false);
+            setIsLoginSubmitting(false);
+        }
+    };
+
+    const onCreateSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        setCreateErrorMessage("");
+
+        if (newWalletPassword !== confirmPassword) {
+            setCreateErrorMessage("Passwords do not match");
+            return;
+        }
+
+        setIsCreateSubmitting(true);
+
+        try {
+            const session = await createBrowserWallet(newWalletName, newWalletPassword);
+            persistWalletSession(session.token, session.browser_wallet);
+            navigate("/wallet");
+        } catch (error) {
+            setCreateErrorMessage(error instanceof Error ? error.message : "Failed to create wallet");
+        } finally {
+            setIsCreateSubmitting(false);
         }
     };
 
@@ -772,44 +816,115 @@ function LoginPage() {
                 <p className="masthead-kicker">Wallet Access</p>
                 <h1 className="balances-title">UncCoin Login</h1>
                 <p className="masthead-subtitle">
-                    Log in with your wallet address. Temporary password for now: 1234.
+                    Create a browser wallet with its own password, or sign in to a wallet previously created here.
                 </p>
             </header>
 
-
-            <section className="balances-shell login-shell" aria-label="Wallet login">
-                <form className="wallet-login-form" onSubmit={onSubmit}>
-                    <label className="wallet-login-field">
-                        <span className="chain-stat-label">Wallet address</span>
-                        <input
-                            className="wallet-login-input"
-                            value={walletAddress}
-                            onChange={(event) => {
-                                setWalletAddress(event.target.value);
-                            }}
-                            autoComplete="username"
-                            placeholder="Enter wallet address"
-                        />
-                    </label>
-                    <label className="wallet-login-field">
-                        <span className="chain-stat-label">Password</span>
-                        <input
-                            className="wallet-login-input"
-                            type="password"
-                            value={password}
-                            onChange={(event) => {
-                                setPassword(event.target.value);
-                            }}
-                            autoComplete="current-password"
-                        />
-                    </label>
-                    <div className="wallet-login-actions">
-                        <button className="investment-link investment-button" type="submit" disabled={isSubmitting}>
-                            {isSubmitting ? "Logging in..." : "Log in"}
-                        </button>
+            <section className="wallet-auth-grid" aria-label="Wallet access">
+                <article className="balances-shell login-shell">
+                    <div className="wallet-auth-card-header">
+                        <span className="balances-section-title">Create Browser Wallet</span>
+                        <p className="wallet-auth-card-copy">
+                            This creates a local wallet in `../UncCoin/` and stores its login password in this app.
+                        </p>
                     </div>
-                    {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
-                </form>
+                    <form className="wallet-login-form" onSubmit={onCreateSubmit}>
+                        <label className="wallet-login-field">
+                            <span className="chain-stat-label">Wallet label</span>
+                            <input
+                                className="wallet-login-input"
+                                value={newWalletName}
+                                onChange={(event) => {
+                                    setNewWalletName(event.target.value);
+                                }}
+                                autoComplete="nickname"
+                                placeholder="Ex: browser-unc-main"
+                            />
+                        </label>
+                        <label className="wallet-login-field">
+                            <span className="chain-stat-label">Login password</span>
+                            <input
+                                className="wallet-login-input"
+                                type="password"
+                                value={newWalletPassword}
+                                onChange={(event) => {
+                                    setNewWalletPassword(event.target.value);
+                                }}
+                                autoComplete="new-password"
+                                placeholder="Create a password"
+                            />
+                        </label>
+                        <label className="wallet-login-field">
+                            <span className="chain-stat-label">Confirm password</span>
+                            <input
+                                className="wallet-login-input"
+                                type="password"
+                                value={confirmPassword}
+                                onChange={(event) => {
+                                    setConfirmPassword(event.target.value);
+                                }}
+                                autoComplete="new-password"
+                                placeholder="Repeat the password"
+                            />
+                        </label>
+                        <div className="wallet-login-actions">
+                            <button
+                                className="investment-link investment-button"
+                                type="submit"
+                                disabled={isCreateSubmitting}
+                            >
+                                {isCreateSubmitting ? "Creating wallet..." : "Create wallet"}
+                            </button>
+                        </div>
+                        {createErrorMessage ? <p className="wallet-login-error">{createErrorMessage}</p> : null}
+                    </form>
+                </article>
+
+                <article className="balances-shell login-shell">
+                    <div className="wallet-auth-card-header">
+                        <span className="balances-section-title">Browser Wallet Login</span>
+                        <p className="wallet-auth-card-copy">
+                            Only wallets created in this browser flow can sign in here.
+                        </p>
+                    </div>
+                    <form className="wallet-login-form" onSubmit={onLoginSubmit}>
+                        <label className="wallet-login-field">
+                            <span className="chain-stat-label">Wallet address</span>
+                            <input
+                                className="wallet-login-input"
+                                value={walletAddress}
+                                onChange={(event) => {
+                                    setWalletAddress(event.target.value);
+                                }}
+                                autoComplete="username"
+                                placeholder="Paste a browser-created wallet address"
+                            />
+                        </label>
+                        <label className="wallet-login-field">
+                            <span className="chain-stat-label">Password</span>
+                            <input
+                                className="wallet-login-input"
+                                type="password"
+                                value={password}
+                                onChange={(event) => {
+                                    setPassword(event.target.value);
+                                }}
+                                autoComplete="current-password"
+                                placeholder="Enter wallet password"
+                            />
+                        </label>
+                        <div className="wallet-login-actions">
+                            <button
+                                className="investment-link investment-button"
+                                type="submit"
+                                disabled={isLoginSubmitting}
+                            >
+                                {isLoginSubmitting ? "Logging in..." : "Log in"}
+                            </button>
+                        </div>
+                        {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
+                    </form>
+                </article>
             </section>
         </PageScaffold>
     );
@@ -817,24 +932,30 @@ function LoginPage() {
 
 function WalletDashboardPage() {
     const navigate = useNavigate();
-    const [walletAddress, setWalletAddress] = useState("");
+    const [walletToken, setWalletToken] = useState("");
+    const [browserWallet, setBrowserWallet] = useState<BrowserWallet | null>(loadStoredWalletMeta());
     const [wallet, setWallet] = useState<WalletSummary | null>(null);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [errorMessage, setErrorMessage] = useState("");
+    const [receiverAddress, setReceiverAddress] = useState("");
+    const [sendAmount, setSendAmount] = useState("");
+    const [sendFee, setSendFee] = useState("0");
+    const [sendStatus, setSendStatus] = useState("");
+    const [isSending, setIsSending] = useState(false);
 
     useEffect(() => {
-        const storedWalletAddress = loadStoredWalletAddress();
+        const storedWalletToken = loadStoredWalletToken();
 
-        if (!storedWalletAddress) {
+        if (!storedWalletToken) {
             navigate("/login", { replace: true });
             return;
         }
 
-        setWalletAddress(storedWalletAddress);
+        setWalletToken(storedWalletToken);
     }, [navigate]);
 
     useEffect(() => {
-        if (!walletAddress) {
+        if (!walletToken) {
             return;
         }
 
@@ -842,23 +963,24 @@ function WalletDashboardPage() {
 
         const load = async () => {
             try {
-                const data = await getWalletSummary(walletAddress);
-                let nextWallet = data;
+                const session = await getWalletSession(walletToken);
+                let nextWallet = session.wallet;
 
-                if (data.activity.length === 0 && data.transaction_count > 0) {
+                if (session.wallet.activity.length === 0 && session.wallet.transaction_count > 0) {
                     const chainData = await getBlockchain();
-                    const derivedActivity = buildWalletActivityFromBlockchain(walletAddress, chainData);
+                    const derivedActivity = buildWalletActivityFromBlockchain(session.wallet.wallet_address, chainData);
 
                     if (derivedActivity.length > 0) {
                         nextWallet = {
-                            ...data,
+                            ...session.wallet,
                             activity: derivedActivity,
-                            latest_activity: data.latest_activity ?? derivedActivity[0]?.timestamp ?? null,
+                            latest_activity: session.wallet.latest_activity ?? derivedActivity[0]?.timestamp ?? null,
                         };
                     }
                 }
 
                 if (active) {
+                    setBrowserWallet(session.browser_wallet);
                     setWallet(nextWallet);
                     setLastUpdated(new Date());
                     setErrorMessage("");
@@ -867,10 +989,8 @@ function WalletDashboardPage() {
                 if (active) {
                     const message = error instanceof Error ? error.message : "Failed to load wallet";
                     setErrorMessage(message);
-                    if (message.toLowerCase().includes("not found")) {
-                        window.localStorage.removeItem(WALLET_SESSION_KEY);
-                        navigate("/login", { replace: true });
-                    }
+                    clearWalletSession();
+                    navigate("/login", { replace: true });
                 }
             }
         };
@@ -884,11 +1004,57 @@ function WalletDashboardPage() {
             active = false;
             window.clearInterval(timer);
         };
-    }, [navigate, walletAddress]);
+    }, [navigate, walletToken]);
 
-    const logOut = () => {
-        window.localStorage.removeItem(WALLET_SESSION_KEY);
+    const refreshWallet = async () => {
+        if (!walletToken) {
+            return;
+        }
+
+        const session = await getWalletSession(walletToken);
+        setBrowserWallet(session.browser_wallet);
+        setWallet(session.wallet);
+        setLastUpdated(new Date());
+        setErrorMessage("");
+    };
+
+    const logOut = async () => {
+        const token = walletToken || loadStoredWalletToken();
+        clearWalletSession();
+        if (token) {
+            try {
+                await logoutWalletSession(token);
+            } catch (error) {
+                console.error(error);
+            }
+        }
         navigate("/login");
+    };
+
+    const onSendSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        if (!walletToken) {
+            return;
+        }
+
+        setIsSending(true);
+        setSendStatus("");
+        setErrorMessage("");
+
+        try {
+            const response = await sendWalletTransaction(walletToken, receiverAddress, sendAmount, sendFee);
+            setBrowserWallet(response.browser_wallet);
+            setWallet(response.wallet);
+            setLastUpdated(new Date());
+            setSendStatus("Transaction submitted. The node was started, synced, broadcasted, exported, and stopped.");
+            setReceiverAddress("");
+            setSendAmount("");
+            setSendFee("0");
+        } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : "Failed to send transaction");
+        } finally {
+            setIsSending(false);
+        }
     };
 
     return (
@@ -898,10 +1064,10 @@ function WalletDashboardPage() {
                 <p className="masthead-kicker">Wallet Dashboard</p>
                 <h1 className="balances-title">My UncCoin Wallet</h1>
                 <p className="masthead-subtitle">
-                    Wallet-specific balance and activity pulled from the live balance sheet and blockchain data.
+                    Browser-created wallets can send UncCoins by spinning up the local node on port 4040, syncing,
+                    broadcasting the transaction, and shutting it back down.
                 </p>
             </header>
-
 
             <section className="balances-shell" aria-label="Logged in wallet">
                 <div className="balances-meta">
@@ -913,9 +1079,15 @@ function WalletDashboardPage() {
 
                 <div className="chain-wallet-card chain-wallet-card-header">
                     <div className="chain-wallet-card-copy">
-                        <span className="chain-stat-label">Wallet Address</span>
-                        <code className={getWalletAddressClassName("chain-wallet-value", walletAddress)}>
-                            {walletAddress || "loading..."}
+                        <span className="chain-stat-label">Browser Wallet</span>
+                        <strong className="wallet-browser-name">{browserWallet?.wallet_name ?? "loading..."}</strong>
+                        <code
+                            className={getWalletAddressClassName(
+                                "chain-wallet-value",
+                                wallet?.wallet_address ?? browserWallet?.wallet_address ?? "",
+                            )}
+                        >
+                            {wallet?.wallet_address ?? browserWallet?.wallet_address ?? "loading..."}
                         </code>
                     </div>
                     <button className="wallet-logout-button" type="button" onClick={logOut}>
@@ -924,6 +1096,58 @@ function WalletDashboardPage() {
                 </div>
 
                 {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
+                {sendStatus ? <p className="wallet-send-success">{sendStatus}</p> : null}
+
+                <article className="chain-wallet-card wallet-send-card">
+                    <div className="wallet-history-header">
+                        <span className="chain-stat-label">Send UncCoins</span>
+                        <button className="wallet-refresh-button" type="button" onClick={() => void refreshWallet()}>
+                            Refresh
+                        </button>
+                    </div>
+                    <form className="wallet-send-form" onSubmit={onSendSubmit}>
+                        <label className="wallet-login-field">
+                            <span className="chain-stat-label">Receiver address</span>
+                            <input
+                                className="wallet-login-input"
+                                value={receiverAddress}
+                                onChange={(event) => {
+                                    setReceiverAddress(event.target.value);
+                                }}
+                                placeholder="Enter receiver wallet address"
+                            />
+                        </label>
+                        <div className="wallet-send-form-row">
+                            <label className="wallet-login-field">
+                                <span className="chain-stat-label">Amount</span>
+                                <input
+                                    className="wallet-login-input"
+                                    value={sendAmount}
+                                    onChange={(event) => {
+                                        setSendAmount(event.target.value);
+                                    }}
+                                    placeholder="0"
+                                />
+                            </label>
+                            <label className="wallet-login-field">
+                                <span className="chain-stat-label">Fee</span>
+                                <input
+                                    className="wallet-login-input"
+                                    value={sendFee}
+                                    onChange={(event) => {
+                                        setSendFee(event.target.value);
+                                    }}
+                                    placeholder="0"
+                                />
+                            </label>
+                        </div>
+                        <div className="wallet-login-actions">
+                            <button className="investment-link investment-button" type="submit" disabled={isSending}>
+                                {isSending ? "Starting node and sending..." : "Send UncCoins"}
+                            </button>
+                        </div>
+                    </form>
+                </article>
 
                 <div className="chain-stats">
                     <article className="chain-stat-card">
@@ -969,7 +1193,8 @@ function WalletDashboardPage() {
                         {wallet?.latest_activity ? formatTimestamp(wallet.latest_activity) : "No on-chain activity yet"}
                     </strong>
                     <p className="wallet-activity-meta">
-                        Showing every wallet transaction as a time-sorted ledger entry instead of full block cards.
+                        Browser wallet created:{" "}
+                        {browserWallet?.created_at ? formatTimestamp(browserWallet.created_at) : "loading..."}
                     </p>
                 </article>
 

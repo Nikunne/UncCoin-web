@@ -1,29 +1,77 @@
 import asyncio
+import hashlib
 import json
+import os
+import re
+import secrets
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
 
 
-PENGER_FILE = Path(__file__).parent / "penger.txt"
-BLOCKCHAIN_FILE = Path(__file__).parent / "blockchain.json"
+BASE_DIR = Path(__file__).resolve().parent
+WEB_ROOT = BASE_DIR.parent
+UNCCOIN_REPO = (WEB_ROOT.parent / "UncCoin").resolve()
+UNCCOIN_RUN_SCRIPT = UNCCOIN_REPO / "scripts" / "run.sh"
+PENGER_FILE = BASE_DIR / "penger.txt"
+BLOCKCHAIN_FILE = BASE_DIR / "blockchain.json"
+BROWSER_WALLETS_FILE = BASE_DIR / "browser_wallets.json"
 REFRESH_SECONDS = 10
+NODE_PORT_START = int(os.getenv("UNC_NODE_PORT_START", "8300"))
+NODE_PORT_END = int(os.getenv("UNC_NODE_PORT_END", "8500"))
+NODE_READY_TIMEOUT_SECONDS = int(os.getenv("UNC_NODE_READY_TIMEOUT_SECONDS", "45"))
+SYNC_WAIT_SECONDS = int(os.getenv("UNC_SYNC_WAIT_SECONDS", "15"))
+TX_WAIT_SECONDS = int(os.getenv("UNC_TX_WAIT_SECONDS", "5"))
+DEFAULT_PEER_ADDRESS = os.getenv("UNC_PEER_ADDRESS", "0.0.0.0:4040").strip()
+OUTPUT_BALANCES_PATH = "../UncCoin-web/backend/penger.txt"
+OUTPUT_BLOCKCHAIN_PATH = "../UncCoin-web/backend/blockchain.json"
+PASSWORD_ITERATIONS = 240_000
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
 blockchain: Dict[str, Any] = {}
 blockchain_lock = asyncio.Lock()
+browser_wallets: Dict[str, Dict[str, Any]] = {}
+browser_wallets_lock = asyncio.Lock()
+wallet_sessions: Dict[str, Dict[str, str]] = {}
+wallet_sessions_lock = asyncio.Lock()
+node_command_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
-TEMP_WALLET_PASSWORD = "1234"
+WALLET_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
 
 
 class WalletLoginRequest(BaseModel):
     wallet_address: str
     password: str
+
+
+class BrowserWalletCreateRequest(BaseModel):
+    wallet_name: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=6, max_length=200)
+
+
+class BrowserWalletSendRequest(BaseModel):
+    receiver_address: str
+    amount: str
+    fee: str = "0"
+
+
+class BrowserWalletRecord(BaseModel):
+    wallet_address: str
+    wallet_name: str
+    created_at: str
+
+
+class BrowserWalletSessionResponse(BaseModel):
+    ok: bool
+    token: str
+    browser_wallet: BrowserWalletRecord
+    wallet: Dict[str, Any]
 
 
 def parse_amount(value: Any) -> float:
@@ -50,6 +98,32 @@ def parse_timestamp(value: Any) -> float | None:
         parsed = parsed.replace(tzinfo=UTC)
 
     return parsed.timestamp()
+
+
+def now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def sanitize_wallet_label(wallet_name: str) -> str:
+    lowered = wallet_name.strip().lower().replace("_", "-").replace(" ", "-")
+    normalized = WALLET_NAME_PATTERN.sub("-", lowered).strip("-")
+    return normalized or "browser-wallet"
+
+
+def hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
+    salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PASSWORD_ITERATIONS,
+    )
+    return salt.hex(), digest.hex()
+
+
+def verify_password(password: str, salt_hex: str, password_hash: str) -> bool:
+    _, candidate_hash = hash_password(password, salt_hex)
+    return secrets.compare_digest(candidate_hash, password_hash)
 
 
 def collect_wallet_addresses(chain_data: Dict[str, Any]) -> set[str]:
@@ -200,11 +274,11 @@ async def get_wallet_balance(wallet_address: str) -> float | None:
         return balances.get(wallet_address)
 
 
-async def get_wallet_summary(wallet_address: str) -> Dict[str, Any]:
+async def get_wallet_summary(wallet_address: str, require_chain_presence: bool = True) -> Dict[str, Any]:
     async with blockchain_lock:
         chain_data = dict(blockchain)
 
-    if wallet_address not in collect_wallet_addresses(chain_data):
+    if require_chain_presence and wallet_address not in collect_wallet_addresses(chain_data):
         raise HTTPException(status_code=404, detail="Wallet address not found in blockchain data")
 
     balance = await get_wallet_balance(wallet_address)
@@ -219,7 +293,6 @@ def parse_penger_file(text: str) -> Dict[str, float]:
         if not line:
             continue
 
-        # Ignore headers such as "Balances:"
         if line.endswith(":") and ":" not in line[:-1]:
             continue
 
@@ -236,10 +309,32 @@ def parse_penger_file(text: str) -> Dict[str, float]:
         try:
             parsed[wallet] = float(amount_str)
         except ValueError:
-            # Skip malformed amount lines
             continue
 
     return parsed
+
+
+def load_browser_wallets_file() -> Dict[str, Dict[str, Any]]:
+    if not BROWSER_WALLETS_FILE.exists():
+        return {}
+
+    try:
+        parsed = json.loads(BROWSER_WALLETS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"Error reading {BROWSER_WALLETS_FILE}: {error}")
+        return {}
+
+    if not isinstance(parsed, dict):
+        return {}
+
+    wallets = parsed.get("wallets", {})
+    return wallets if isinstance(wallets, dict) else {}
+
+
+async def save_browser_wallets_file() -> None:
+    async with browser_wallets_lock:
+        payload = {"wallets": browser_wallets}
+        BROWSER_WALLETS_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 async def load_balances_once() -> None:
@@ -249,12 +344,10 @@ async def load_balances_once() -> None:
     try:
         text = PENGER_FILE.read_text(encoding="utf-8")
     except FileNotFoundError:
-        # Handle the case where the file is not found
         print(f"Error: {PENGER_FILE} not found.")
         return
-    except Exception as e:
-        # Handle other potential file reading errors
-        print(f"Error reading {PENGER_FILE}: {e}")
+    except Exception as error:
+        print(f"Error reading {PENGER_FILE}: {error}")
         return
 
     parsed = parse_penger_file(text)
@@ -297,11 +390,301 @@ async def refresh_loop() -> None:
         await asyncio.sleep(REFRESH_SECONDS)
 
 
+async def register_browser_wallet(wallet_address: str, wallet_name: str, password: str, internal_wallet_name: str) -> Dict[str, Any]:
+    salt_hex, password_hash = hash_password(password)
+    node_port = await allocate_node_port()
+    record = {
+        "wallet_address": wallet_address,
+        "wallet_name": wallet_name,
+        "internal_wallet_name": internal_wallet_name,
+        "node_port": node_port,
+        "created_at": now_iso(),
+        "password_salt": salt_hex,
+        "password_hash": password_hash,
+    }
+
+    async with browser_wallets_lock:
+        browser_wallets[wallet_address] = record
+
+    await save_browser_wallets_file()
+    return record
+
+
+async def get_browser_wallet(wallet_address: str) -> Dict[str, Any] | None:
+    async with browser_wallets_lock:
+        record = browser_wallets.get(wallet_address)
+        return dict(record) if record else None
+
+
+async def allocate_node_port() -> int:
+    async with browser_wallets_lock:
+        used_ports = {
+            int(record["node_port"])
+            for record in browser_wallets.values()
+            if isinstance(record, dict) and str(record.get("node_port", "")).isdigit()
+        }
+
+    for candidate in range(NODE_PORT_START, NODE_PORT_END + 1):
+        if candidate not in used_ports:
+            return candidate
+
+    raise HTTPException(
+        status_code=503,
+        detail=f"No wallet node ports available in range {NODE_PORT_START}-{NODE_PORT_END}",
+    )
+
+
+async def create_session_for_wallet(wallet_record: Dict[str, Any]) -> str:
+    token = secrets.token_urlsafe(32)
+    async with wallet_sessions_lock:
+        wallet_sessions[token] = {
+            "wallet_address": wallet_record["wallet_address"],
+            "created_at": now_iso(),
+        }
+    return token
+
+
+async def get_wallet_address_for_token(token: str) -> str | None:
+    async with wallet_sessions_lock:
+        session = wallet_sessions.get(token)
+        return session.get("wallet_address") if session else None
+
+
+async def delete_session(token: str) -> None:
+    async with wallet_sessions_lock:
+        wallet_sessions.pop(token, None)
+
+
+def require_bearer_token(authorization: str | None) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not value.strip():
+        raise HTTPException(status_code=401, detail="Invalid authorization token")
+
+    return value.strip()
+
+
+async def require_authenticated_browser_wallet(authorization: str | None) -> Dict[str, Any]:
+    token = require_bearer_token(authorization)
+    wallet_address = await get_wallet_address_for_token(token)
+    if not wallet_address:
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+
+    wallet_record = await get_browser_wallet(wallet_address)
+    if not wallet_record:
+        await delete_session(token)
+        raise HTTPException(status_code=401, detail="Wallet session is no longer valid")
+
+    return wallet_record
+
+
+def format_browser_wallet_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    return BrowserWalletRecord(
+        wallet_address=record["wallet_address"],
+        wallet_name=record["wallet_name"],
+        created_at=record["created_at"],
+    ).model_dump()
+
+
+async def run_subprocess(command: list[str], cwd: Path) -> tuple[int, str]:
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    stdout, _ = await process.communicate()
+    return process.returncode or 0, stdout.decode("utf-8", errors="replace")
+
+
+async def create_unccoin_wallet(wallet_label: str) -> tuple[str, str]:
+    if not UNCCOIN_REPO.exists():
+        raise HTTPException(status_code=500, detail=f"Missing UncCoin repo at {UNCCOIN_REPO}")
+
+    cleaned_label = sanitize_wallet_label(wallet_label)
+    internal_wallet_name = f"browser-{cleaned_label}-{secrets.token_hex(4)}"
+    command = ["python3", "-m", "wallet.cli", "create", "--name", internal_wallet_name]
+    exit_code, output = await run_subprocess(command, UNCCOIN_REPO)
+
+    if exit_code != 0:
+        raise HTTPException(status_code=500, detail=f"Wallet creation failed:\n{output.strip()}")
+
+    address_line = next((line for line in output.splitlines() if line.startswith("Address: ")), "")
+    wallet_address = address_line.replace("Address: ", "", 1).strip()
+    if not wallet_address:
+        raise HTTPException(status_code=500, detail=f"Could not parse wallet address from output:\n{output.strip()}")
+
+    return internal_wallet_name, wallet_address
+
+
+class InteractiveNodeRunner:
+    def __init__(self, wallet_name: str, node_port: int):
+        self.wallet_name = wallet_name
+        self.node_port = node_port
+        self.process: asyncio.subprocess.Process | None = None
+        self.ready_event = asyncio.Event()
+        self.output_lines: deque[str] = deque(maxlen=400)
+        self.stream_task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        command = [str(UNCCOIN_RUN_SCRIPT), self.wallet_name, str(self.node_port)]
+
+        self.process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=str(UNCCOIN_REPO),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        self.stream_task = asyncio.create_task(self._stream_output())
+
+    async def _stream_output(self) -> None:
+        if self.process is None or self.process.stdout is None:
+            return
+
+        while True:
+            line = await self.process.stdout.readline()
+            if not line:
+                break
+
+            decoded = line.decode("utf-8", errors="replace").rstrip()
+            self.output_lines.append(decoded)
+
+            if "Node ready." in decoded:
+                self.ready_event.set()
+
+    def tail_output(self) -> str:
+        return "\n".join(self.output_lines).strip()
+
+    async def wait_until_ready(self) -> None:
+        if self.process is None:
+            raise RuntimeError("Node process is not running")
+
+        try:
+            await asyncio.wait_for(self.ready_event.wait(), timeout=NODE_READY_TIMEOUT_SECONDS)
+        except TimeoutError as error:
+            raise HTTPException(
+                status_code=504,
+                detail=f"Timed out waiting for node startup.\n{self.tail_output()}",
+            ) from error
+
+    async def send_command(self, command: str) -> None:
+        if self.process is None or self.process.stdin is None:
+            raise RuntimeError("Node process stdin is unavailable")
+
+        self.process.stdin.write(f"{command}\n".encode("utf-8"))
+        await self.process.stdin.drain()
+        self.output_lines.append(f"> {command}")
+
+    async def sleep(self, seconds: int) -> None:
+        await asyncio.sleep(seconds)
+
+    async def close(self) -> None:
+        if self.process is None:
+            return
+
+        if self.process.returncode is None:
+            try:
+                await self.send_command("quit")
+                await asyncio.wait_for(self.process.wait(), timeout=10)
+            except Exception:
+                self.process.terminate()
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+                except Exception:
+                    self.process.kill()
+                    await self.process.wait()
+
+        if self.stream_task is not None:
+            await self.stream_task
+
+
+async def sync_local_exports() -> None:
+    await load_balances_once()
+    await load_blockchain_once()
+
+
+async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_address: str, amount: str, fee: str) -> str:
+    if not receiver_address.strip():
+        raise HTTPException(status_code=400, detail="Receiver wallet address is required")
+
+    async with node_command_lock:
+        node_port = int(wallet_record["node_port"])
+        runner = InteractiveNodeRunner(wallet_record["internal_wallet_name"], node_port)
+
+        try:
+            await runner.start()
+            await runner.wait_until_ready()
+            if DEFAULT_PEER_ADDRESS:
+                await runner.send_command(f"add-peer {DEFAULT_PEER_ADDRESS}")
+                await runner.sleep(2)
+            await runner.send_command("sync")
+            await runner.sleep(SYNC_WAIT_SECONDS)
+            await runner.send_command(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
+            await runner.sleep(TX_WAIT_SECONDS)
+            await runner.send_command(f"txtbalances {OUTPUT_BALANCES_PATH}")
+            await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
+            await runner.sleep(2)
+        except HTTPException:
+            raise
+        except Exception as error:
+            raise HTTPException(status_code=500, detail=f"Failed to send transaction: {error}") from error
+        finally:
+            await runner.close()
+
+        output = runner.tail_output()
+        if "Invalid tx command:" in output:
+            tail = output.rsplit("Invalid tx command:", maxsplit=1)[-1].strip()
+            raise HTTPException(status_code=400, detail=f"Transaction rejected: {tail}")
+
+        await sync_local_exports()
+        return output
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global refresh_task
 
-    await load_balances_once()  # load immediately on startup
+    async with browser_wallets_lock:
+        browser_wallets.clear()
+        browser_wallets.update(load_browser_wallets_file())
+        migrated = False
+        used_ports: set[int] = set()
+        for wallet_address, record in browser_wallets.items():
+            if not isinstance(record, dict):
+                continue
+
+            raw_port = record.get("node_port")
+            if isinstance(raw_port, int):
+                used_ports.add(raw_port)
+                continue
+
+            if isinstance(raw_port, str) and raw_port.isdigit():
+                record["node_port"] = int(raw_port)
+                used_ports.add(record["node_port"])
+                migrated = True
+                continue
+
+            for candidate in range(NODE_PORT_START, NODE_PORT_END + 1):
+                if candidate not in used_ports:
+                    record["node_port"] = candidate
+                    used_ports.add(candidate)
+                    migrated = True
+                    break
+            else:
+                raise RuntimeError(
+                    f"No wallet node ports available in range {NODE_PORT_START}-{NODE_PORT_END}"
+                )
+
+        if migrated:
+            BROWSER_WALLETS_FILE.write_text(
+                json.dumps({"wallets": browser_wallets}, indent=2),
+                encoding="utf-8",
+            )
+
+    await load_balances_once()
     await load_blockchain_once()
     refresh_task = asyncio.create_task(refresh_loop())
 
@@ -332,19 +715,86 @@ async def get_blockchain() -> Dict[str, Any]:
 
 
 @app.post("/wallet-login")
-async def wallet_login(payload: WalletLoginRequest) -> Dict[str, Any]:
+async def wallet_login(payload: WalletLoginRequest) -> BrowserWalletSessionResponse:
     wallet_address = payload.wallet_address.strip()
 
     if not wallet_address:
         raise HTTPException(status_code=400, detail="Wallet address is required")
 
-    if payload.password != TEMP_WALLET_PASSWORD:
+    wallet_record = await get_browser_wallet(wallet_address)
+    if not wallet_record:
+        raise HTTPException(status_code=401, detail="Only wallets created in the browser can log in here")
+
+    if not verify_password(payload.password, wallet_record["password_salt"], wallet_record["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid wallet address or password")
 
-    summary = await get_wallet_summary(wallet_address)
+    token = await create_session_for_wallet(wallet_record)
+    summary = await get_wallet_summary(wallet_address, require_chain_presence=False)
+
+    return BrowserWalletSessionResponse(
+        ok=True,
+        token=token,
+        browser_wallet=format_browser_wallet_record(wallet_record),
+        wallet=summary,
+    )
+
+
+@app.post("/browser-wallets")
+async def create_browser_wallet(payload: BrowserWalletCreateRequest) -> BrowserWalletSessionResponse:
+    internal_wallet_name, wallet_address = await create_unccoin_wallet(payload.wallet_name)
+    wallet_record = await register_browser_wallet(
+        wallet_address=wallet_address,
+        wallet_name=payload.wallet_name.strip(),
+        password=payload.password,
+        internal_wallet_name=internal_wallet_name,
+    )
+    token = await create_session_for_wallet(wallet_record)
+    summary = await get_wallet_summary(wallet_address, require_chain_presence=False)
+
+    return BrowserWalletSessionResponse(
+        ok=True,
+        token=token,
+        browser_wallet=format_browser_wallet_record(wallet_record),
+        wallet=summary,
+    )
+
+
+@app.get("/wallet-session")
+async def get_wallet_session(authorization: str | None = Header(default=None)) -> Dict[str, Any]:
+    wallet_record = await require_authenticated_browser_wallet(authorization)
+    summary = await get_wallet_summary(wallet_record["wallet_address"], require_chain_presence=False)
     return {
         "ok": True,
+        "browser_wallet": format_browser_wallet_record(wallet_record),
         "wallet": summary,
+    }
+
+
+@app.post("/wallet-session/logout")
+async def logout_wallet_session(authorization: str | None = Header(default=None)) -> Dict[str, bool]:
+    token = require_bearer_token(authorization)
+    await delete_session(token)
+    return {"ok": True}
+
+
+@app.post("/wallet-send")
+async def wallet_send(
+    payload: BrowserWalletSendRequest,
+    authorization: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    wallet_record = await require_authenticated_browser_wallet(authorization)
+    command_output = await send_unccoin_transaction(
+        wallet_record=wallet_record,
+        receiver_address=payload.receiver_address,
+        amount=payload.amount,
+        fee=payload.fee,
+    )
+    wallet = await get_wallet_summary(wallet_record["wallet_address"], require_chain_presence=False)
+    return {
+        "ok": True,
+        "wallet": wallet,
+        "browser_wallet": format_browser_wallet_record(wallet_record),
+        "command_output": command_output,
     }
 
 

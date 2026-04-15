@@ -25,9 +25,24 @@ export type WalletSummary = {
     activity: WalletActivityItem[];
 };
 
-type WalletLoginResponse = {
-    ok: boolean;
+export type BrowserWallet = {
+    wallet_address: string;
+    wallet_name: string;
+    created_at: string;
+};
+
+export type WalletSession = {
+    token: string;
+    browser_wallet: BrowserWallet;
     wallet: WalletSummary;
+};
+
+type WalletSessionApiResponse = {
+    ok: boolean;
+    token?: string;
+    browser_wallet: BrowserWallet;
+    wallet: WalletSummary;
+    command_output?: string;
 };
 
 function asNumber(value: unknown): number {
@@ -80,7 +95,34 @@ function normalizeWalletSummary(value: unknown): WalletSummary {
     };
 }
 
-export async function loginWithWallet(walletAddress: string, password: string): Promise<WalletSummary> {
+function normalizeBrowserWallet(value: unknown): BrowserWallet {
+    const wallet = (value ?? {}) as Partial<BrowserWallet>;
+
+    return {
+        wallet_address: typeof wallet.wallet_address === "string" ? wallet.wallet_address : "",
+        wallet_name: typeof wallet.wallet_name === "string" ? wallet.wallet_name : "",
+        created_at: typeof wallet.created_at === "string" ? wallet.created_at : "",
+    };
+}
+
+function normalizeWalletSessionResponse(value: unknown): WalletSessionApiResponse {
+    const response = (value ?? {}) as Partial<WalletSessionApiResponse>;
+
+    return {
+        ok: response.ok === true,
+        token: typeof response.token === "string" ? response.token : undefined,
+        browser_wallet: normalizeBrowserWallet(response.browser_wallet),
+        wallet: normalizeWalletSummary(response.wallet),
+        command_output: typeof response.command_output === "string" ? response.command_output : undefined,
+    };
+}
+
+async function parseError(response: Response): Promise<never> {
+    const data = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(data?.detail ?? `Request failed: ${response.status}`);
+}
+
+export async function loginWithWallet(walletAddress: string, password: string): Promise<WalletSession> {
     const response = await fetch(`${API_BASE_URL}/wallet-login`, {
         method: "POST",
         headers: {
@@ -93,20 +135,116 @@ export async function loginWithWallet(walletAddress: string, password: string): 
     });
 
     if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(data?.detail ?? `Failed to log in: ${response.status}`);
+        await parseError(response);
     }
 
-    const data = (await response.json()) as WalletLoginResponse;
-    return normalizeWalletSummary(data.wallet);
+    const data = normalizeWalletSessionResponse(await response.json());
+    if (!data.token) {
+        throw new Error("Wallet session token was missing from the response");
+    }
+
+    return {
+        token: data.token,
+        browser_wallet: data.browser_wallet,
+        wallet: data.wallet,
+    };
+}
+
+export async function createBrowserWallet(walletName: string, password: string): Promise<WalletSession> {
+    const response = await fetch(`${API_BASE_URL}/browser-wallets`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            wallet_name: walletName,
+            password,
+        }),
+    });
+
+    if (!response.ok) {
+        await parseError(response);
+    }
+
+    const data = normalizeWalletSessionResponse(await response.json());
+    if (!data.token) {
+        throw new Error("Wallet session token was missing from the response");
+    }
+
+    return {
+        token: data.token,
+        browser_wallet: data.browser_wallet,
+        wallet: data.wallet,
+    };
+}
+
+export async function getWalletSession(token: string): Promise<Omit<WalletSession, "token">> {
+    const response = await fetch(`${API_BASE_URL}/wallet-session`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+
+    if (!response.ok) {
+        await parseError(response);
+    }
+
+    const data = normalizeWalletSessionResponse(await response.json());
+    return {
+        browser_wallet: data.browser_wallet,
+        wallet: data.wallet,
+    };
+}
+
+export async function logoutWalletSession(token: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/wallet-session/logout`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+
+    if (!response.ok) {
+        await parseError(response);
+    }
+}
+
+export async function sendWalletTransaction(
+    token: string,
+    receiverAddress: string,
+    amount: string,
+    fee: string,
+): Promise<Omit<WalletSession, "token"> & { command_output?: string }> {
+    const response = await fetch(`${API_BASE_URL}/wallet-send`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+            receiver_address: receiverAddress,
+            amount,
+            fee,
+        }),
+    });
+
+    if (!response.ok) {
+        await parseError(response);
+    }
+
+    const data = normalizeWalletSessionResponse(await response.json());
+    return {
+        browser_wallet: data.browser_wallet,
+        wallet: data.wallet,
+        command_output: data.command_output,
+    };
 }
 
 export async function getWalletSummary(walletAddress: string): Promise<WalletSummary> {
     const response = await fetch(`${API_BASE_URL}/wallets/${encodeURIComponent(walletAddress)}`);
 
     if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(data?.detail ?? `Failed to fetch wallet: ${response.status}`);
+        await parseError(response);
     }
 
     return normalizeWalletSummary(await response.json());
