@@ -14,11 +14,13 @@ from pathlib import Path
 WORKDIR = Path("/home/hus/krypto/UncCoin")
 START_CMD = ["./scripts/run.sh", "riggaagent", "4040"]
 PEER_CMD = "add-peer 100.71.105.5:5000"
+SYNC_CMD = "sync"
 BALANCE_CMD = "txtbalances ./penger.txt"
 BLOCKCHAIN_CMD = "txtblockchain ./blockchain.json"
 INITIAL_WAIT_SECONDS = 20
 POST_PEER_WAIT_SECONDS = 60
 LOOP_INTERVAL_SECONDS = 10
+SYNC_INTERVAL_SECONDS = 600
 
 
 def stream_output(pipe, prefix):
@@ -62,11 +64,16 @@ def main():
         send_command(proc, PEER_CMD)
         print(f"[agent] waiting {POST_PEER_WAIT_SECONDS}s after add-peer")
         time.sleep(POST_PEER_WAIT_SECONDS)
+        last_sync_time = time.monotonic()
 
         while True:
             if proc.poll() is not None:
                 print(f"[agent] child process exited with code {proc.returncode}", file=sys.stderr)
                 sys.exit(proc.returncode or 1)
+
+            if time.monotonic() - last_sync_time >= SYNC_INTERVAL_SECONDS:
+                send_command(proc, SYNC_CMD)
+                last_sync_time = time.monotonic()
 
             send_command(proc, BALANCE_CMD)
             send_command(proc, BLOCKCHAIN_CMD)
