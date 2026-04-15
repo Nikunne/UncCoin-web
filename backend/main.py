@@ -32,6 +32,7 @@ OUTPUT_BALANCES_PATH = "../UncCoin-web/backend/penger.txt"
 OUTPUT_BLOCKCHAIN_PATH = "../UncCoin-web/backend/blockchain.json"
 PASSWORD_ITERATIONS = 240_000
 COMMAND_POLL_INTERVAL_SECONDS = 0.25
+SYNC_SETTLE_IDLE_SECONDS = float(os.getenv("UNC_SYNC_SETTLE_IDLE_SECONDS", "2.5"))
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
@@ -648,6 +649,55 @@ class InteractiveNodeRunner:
 
             await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
 
+    async def wait_for_sync_settle(
+        self,
+        timeout_seconds: int,
+        idle_seconds: float = SYNC_SETTLE_IDLE_SECONDS,
+    ) -> None:
+        sync_markers = [
+            "Chain chunk received from ",
+            "Requesting next chain chunk from ",
+            "Chain sync chunk processed: ",
+            "Chain sync from ",
+        ]
+
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        last_seen_sync_activity: float | None = None
+        seen_sync_activity = False
+        inspected_count = 0
+
+        while True:
+            current_time = asyncio.get_running_loop().time()
+            output_snapshot = list(self.output_lines)
+            new_lines = output_snapshot[inspected_count:]
+            inspected_count = len(output_snapshot)
+
+            for line in new_lines:
+                if any(marker in line for marker in sync_markers):
+                    seen_sync_activity = True
+                    last_seen_sync_activity = current_time
+
+                if "Stopping automatic sync." in line:
+                    return
+
+            if seen_sync_activity and last_seen_sync_activity is not None:
+                if current_time - last_seen_sync_activity >= idle_seconds:
+                    return
+
+            if self.process is not None and self.process.returncode is not None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Node exited unexpectedly during sync.\n{self.tail_output()}",
+                )
+
+            if current_time >= deadline:
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Timed out waiting for blockchain sync to settle.\n{self.tail_output()}",
+                )
+
+            await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
+
     async def wait_until_ready(self) -> None:
         if self.process is None:
             raise RuntimeError("Node process is not running")
@@ -720,7 +770,7 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
                     detail = output.rsplit("Invalid add-peer command:", maxsplit=1)[-1].strip()
                     raise HTTPException(status_code=400, detail=f"Peer connection failed: {detail}")
             await runner.send_command("sync")
-            await runner.sleep(SYNC_WAIT_SECONDS)
+            await runner.wait_for_sync_settle(timeout_seconds=max(SYNC_WAIT_SECONDS, 45))
             await runner.send_command(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
             tx_result = await runner.wait_for_output(
                 success_markers=["Broadcast transaction "],
