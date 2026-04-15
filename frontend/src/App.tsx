@@ -777,7 +777,7 @@ function LoginPage() {
         setIsLoginSubmitting(true);
 
         try {
-            const session = await loginWithWallet(walletAddress, password);
+            const session = await loginWithWallet(walletAddress.trim(), password);
             persistWalletSession(session.token, session.browser_wallet);
             navigate("/wallet");
         } catch (error) {
@@ -791,15 +791,27 @@ function LoginPage() {
         event.preventDefault();
         setCreateErrorMessage("");
 
+        const trimmedWalletName = newWalletName.trim();
+
         if (newWalletPassword !== confirmPassword) {
             setCreateErrorMessage("Passwords do not match");
+            return;
+        }
+
+        if (trimmedWalletName.length < 3) {
+            setCreateErrorMessage("Wallet label must be at least 3 characters");
+            return;
+        }
+
+        if (newWalletPassword.length < 6) {
+            setCreateErrorMessage("Password must be at least 6 characters");
             return;
         }
 
         setIsCreateSubmitting(true);
 
         try {
-            const session = await createBrowserWallet(newWalletName, newWalletPassword);
+            const session = await createBrowserWallet(trimmedWalletName, newWalletPassword);
             persistWalletSession(session.token, session.browser_wallet);
             navigate("/wallet");
         } catch (error) {
@@ -839,6 +851,8 @@ function LoginPage() {
                                 }}
                                 autoComplete="nickname"
                                 placeholder="Ex: browser-unc-main"
+                                minLength={3}
+                                required
                             />
                         </label>
                         <label className="wallet-login-field">
@@ -852,6 +866,8 @@ function LoginPage() {
                                 }}
                                 autoComplete="new-password"
                                 placeholder="Create a password"
+                                minLength={6}
+                                required
                             />
                         </label>
                         <label className="wallet-login-field">
@@ -865,6 +881,8 @@ function LoginPage() {
                                 }}
                                 autoComplete="new-password"
                                 placeholder="Repeat the password"
+                                minLength={6}
+                                required
                             />
                         </label>
                         <div className="wallet-login-actions">
@@ -898,6 +916,7 @@ function LoginPage() {
                                 }}
                                 autoComplete="username"
                                 placeholder="Paste a browser-created wallet address"
+                                required
                             />
                         </label>
                         <label className="wallet-login-field">
@@ -911,6 +930,7 @@ function LoginPage() {
                                 }}
                                 autoComplete="current-password"
                                 placeholder="Enter wallet password"
+                                required
                             />
                         </label>
                         <div className="wallet-login-actions">

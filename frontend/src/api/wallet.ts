@@ -118,8 +118,23 @@ function normalizeWalletSessionResponse(value: unknown): WalletSessionApiRespons
 }
 
 async function parseError(response: Response): Promise<never> {
-    const data = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(data?.detail ?? `Request failed: ${response.status}`);
+    const data = (await response.json().catch(() => null)) as
+        | { detail?: string | Array<{ loc?: unknown[]; msg?: string }> }
+        | null;
+
+    if (Array.isArray(data?.detail)) {
+        const message = data.detail
+            .map((entry) => {
+                const location = Array.isArray(entry.loc) ? entry.loc.slice(1).join(".") : "request";
+                const detail = typeof entry.msg === "string" ? entry.msg : "Invalid value";
+                return `${location}: ${detail}`;
+            })
+            .join(". ");
+
+        throw new Error(message || `Request failed: ${response.status}`);
+    }
+
+    throw new Error(typeof data?.detail === "string" ? data.detail : `Request failed: ${response.status}`);
 }
 
 export async function loginWithWallet(walletAddress: string, password: string): Promise<WalletSession> {
