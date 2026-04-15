@@ -23,6 +23,7 @@ UNCCOIN_BLOCKCHAINS_DIR = UNCCOIN_REPO / "state" / "blockchains"
 PENGER_FILE = BASE_DIR / "penger.txt"
 BLOCKCHAIN_FILE = BASE_DIR / "blockchain.json"
 BROWSER_WALLETS_FILE = BASE_DIR / "browser_wallets.json"
+APP_SETTINGS_FILE = BASE_DIR / "app_settings.json"
 REFRESH_SECONDS = 10
 NODE_PORT_START = int(os.getenv("UNC_NODE_PORT_START", "8300"))
 NODE_PORT_END = int(os.getenv("UNC_NODE_PORT_END", "8500"))
@@ -51,6 +52,8 @@ wallet_sessions_lock = asyncio.Lock()
 node_command_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
 WALLET_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
+app_settings: Dict[str, str] = {"bonus_amount": DEFAULT_BONUS_AMOUNT}
+app_settings_lock = asyncio.Lock()
 
 
 class WalletLoginRequest(BaseModel):
@@ -67,7 +70,10 @@ class BrowserWalletSendRequest(BaseModel):
     receiver_address: str
     amount: str
     fee: str = "0"
-    bonus_amount: str = DEFAULT_BONUS_AMOUNT
+
+
+class BonusAmountUpdateRequest(BaseModel):
+    bonus_amount: str
 
 
 class BrowserWalletRecord(BaseModel):
@@ -81,6 +87,28 @@ class BrowserWalletSessionResponse(BaseModel):
     token: str
     browser_wallet: BrowserWalletRecord
     wallet: Dict[str, Any]
+
+
+def load_app_settings_file() -> Dict[str, str]:
+    if not APP_SETTINGS_FILE.exists():
+        return {"bonus_amount": DEFAULT_BONUS_AMOUNT}
+
+    try:
+        parsed = json.loads(APP_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"Error reading {APP_SETTINGS_FILE}: {error}")
+        return {"bonus_amount": DEFAULT_BONUS_AMOUNT}
+
+    if not isinstance(parsed, dict):
+        return {"bonus_amount": DEFAULT_BONUS_AMOUNT}
+
+    bonus_amount = parsed.get("bonus_amount", DEFAULT_BONUS_AMOUNT)
+    return {"bonus_amount": str(bonus_amount)}
+
+
+async def save_app_settings_file() -> None:
+    async with app_settings_lock:
+        APP_SETTINGS_FILE.write_text(json.dumps(app_settings, indent=2), encoding="utf-8")
 
 
 def parse_amount(value: Any) -> float:
@@ -309,6 +337,22 @@ async def ensure_wallet_exists_on_chain(wallet_address: str) -> None:
 
     if normalized_address not in collect_wallet_addresses(chain_data):
         raise HTTPException(status_code=400, detail="Receiver wallet address does not exist on-chain")
+
+
+async def get_bonus_amount_setting() -> str:
+    async with app_settings_lock:
+        return str(app_settings.get("bonus_amount", DEFAULT_BONUS_AMOUNT))
+
+
+async def set_bonus_amount_setting(bonus_amount: str) -> str:
+    normalized_bonus_amount = bonus_amount.strip()
+    parse_decimal_amount(normalized_bonus_amount, "Bonus amount")
+
+    async with app_settings_lock:
+        app_settings["bonus_amount"] = normalized_bonus_amount
+
+    await save_app_settings_file()
+    return normalized_bonus_amount
 
 
 def parse_decimal_amount(value: str, field_name: str) -> Decimal:
@@ -841,7 +885,7 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
         receiver_address=receiver_address,
         amount=amount,
         fee=fee,
-        bonus_amount=DEFAULT_BONUS_AMOUNT,
+        bonus_amount=await get_bonus_amount_setting(),
     )
 
 
@@ -985,6 +1029,10 @@ async def lifespan(app: FastAPI):
                 encoding="utf-8",
             )
 
+    async with app_settings_lock:
+        app_settings.clear()
+        app_settings.update(load_app_settings_file())
+
     await load_balances_once()
     await load_blockchain_once()
     refresh_task = asyncio.create_task(refresh_loop())
@@ -1068,6 +1116,7 @@ async def get_wallet_session(authorization: str | None = Header(default=None)) -
         "ok": True,
         "browser_wallet": format_browser_wallet_record(wallet_record),
         "wallet": summary,
+        "bonus_amount": await get_bonus_amount_setting(),
     }
 
 
@@ -1084,12 +1133,13 @@ async def wallet_send(
     authorization: str | None = Header(default=None),
 ) -> Dict[str, Any]:
     wallet_record = await require_authenticated_browser_wallet(authorization)
+    bonus_amount = await get_bonus_amount_setting()
     command_output = await send_unccoin_transaction_with_bonus(
         wallet_record=wallet_record,
         receiver_address=payload.receiver_address,
         amount=payload.amount,
         fee=payload.fee,
-        bonus_amount=payload.bonus_amount,
+        bonus_amount=bonus_amount,
     )
     wallet = await get_wallet_summary(wallet_record["wallet_address"], require_chain_presence=False)
     return {
@@ -1097,6 +1147,29 @@ async def wallet_send(
         "wallet": wallet,
         "browser_wallet": format_browser_wallet_record(wallet_record),
         "command_output": command_output,
+        "bonus_amount": bonus_amount,
+    }
+
+
+@app.get("/bonus-amount")
+async def get_bonus_amount(authorization: str | None = Header(default=None)) -> Dict[str, Any]:
+    await require_authenticated_browser_wallet(authorization)
+    return {
+        "ok": True,
+        "bonus_amount": await get_bonus_amount_setting(),
+    }
+
+
+@app.post("/bonus-amount")
+async def update_bonus_amount(
+    payload: BonusAmountUpdateRequest,
+    authorization: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    await require_authenticated_browser_wallet(authorization)
+    bonus_amount = await set_bonus_amount_setting(payload.bonus_amount)
+    return {
+        "ok": True,
+        "bonus_amount": bonus_amount,
     }
 
 
