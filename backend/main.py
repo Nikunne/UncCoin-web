@@ -31,6 +31,7 @@ DEFAULT_PEER_ADDRESS = os.getenv("UNC_PEER_ADDRESS", "0.0.0.0:4040").strip()
 OUTPUT_BALANCES_PATH = "../UncCoin-web/backend/penger.txt"
 OUTPUT_BLOCKCHAIN_PATH = "../UncCoin-web/backend/blockchain.json"
 PASSWORD_ITERATIONS = 240_000
+COMMAND_POLL_INTERVAL_SECONDS = 0.25
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
@@ -577,6 +578,40 @@ class InteractiveNodeRunner:
     def tail_output(self) -> str:
         return "\n".join(self.output_lines).strip()
 
+    async def wait_for_output(
+        self,
+        success_markers: list[str],
+        failure_markers: list[str] | None = None,
+        timeout_seconds: int = 15,
+    ) -> str:
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        failure_markers = failure_markers or []
+
+        while True:
+            output = self.tail_output()
+
+            for marker in failure_markers:
+                if marker in output:
+                    return marker
+
+            for marker in success_markers:
+                if marker in output:
+                    return marker
+
+            if self.process is not None and self.process.returncode is not None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Node exited unexpectedly.\n{output}",
+                )
+
+            if asyncio.get_running_loop().time() >= deadline:
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Timed out waiting for node response.\n{output}",
+                )
+
+            await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
+
     async def wait_until_ready(self) -> None:
         if self.process is None:
             raise RuntimeError("Node process is not running")
@@ -638,11 +673,31 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
             await runner.wait_until_ready()
             if DEFAULT_PEER_ADDRESS:
                 await runner.send_command(f"add-peer {DEFAULT_PEER_ADDRESS}")
-                await runner.sleep(2)
+                add_peer_result = await runner.wait_for_output(
+                    success_markers=[f"Connected to peer {DEFAULT_PEER_ADDRESS}"],
+                    failure_markers=["Invalid add-peer command:"],
+                    timeout_seconds=10,
+                )
+                if add_peer_result == "Invalid add-peer command:":
+                    output = runner.tail_output()
+                    detail = output.rsplit("Invalid add-peer command:", maxsplit=1)[-1].strip()
+                    raise HTTPException(status_code=400, detail=f"Peer connection failed: {detail}")
             await runner.send_command("sync")
             await runner.sleep(SYNC_WAIT_SECONDS)
             await runner.send_command(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
-            await runner.sleep(TX_WAIT_SECONDS)
+            tx_result = await runner.wait_for_output(
+                success_markers=["Broadcast transaction "],
+                failure_markers=["Invalid tx command:", "Rejected local transaction "],
+                timeout_seconds=max(TX_WAIT_SECONDS, 15),
+            )
+            if tx_result == "Invalid tx command:":
+                output = runner.tail_output()
+                detail = output.rsplit("Invalid tx command:", maxsplit=1)[-1].strip()
+                raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
+            if tx_result == "Rejected local transaction ":
+                output = runner.tail_output()
+                detail = output.rsplit("Rejected local transaction ", maxsplit=1)[-1].strip()
+                raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
             await runner.send_command(f"txtbalances {OUTPUT_BALANCES_PATH}")
             await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
             await runner.sleep(2)
@@ -654,10 +709,6 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
             await runner.close()
 
         output = runner.tail_output()
-        if "Invalid tx command:" in output:
-            tail = output.rsplit("Invalid tx command:", maxsplit=1)[-1].strip()
-            raise HTTPException(status_code=400, detail=f"Transaction rejected: {tail}")
-
         await sync_local_exports()
         return output
 
