@@ -19,6 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent
 WEB_ROOT = BASE_DIR.parent
 UNCCOIN_REPO = (WEB_ROOT.parent / "UncCoin").resolve()
 UNCCOIN_RUN_SCRIPT = UNCCOIN_REPO / "scripts" / "run.sh"
+UNCCOIN_BLOCKCHAINS_DIR = UNCCOIN_REPO / "state" / "blockchains"
 PENGER_FILE = BASE_DIR / "penger.txt"
 BLOCKCHAIN_FILE = BASE_DIR / "blockchain.json"
 BROWSER_WALLETS_FILE = BASE_DIR / "browser_wallets.json"
@@ -398,6 +399,26 @@ async def load_blockchain_once() -> None:
     async with blockchain_lock:
         blockchain.clear()
         blockchain.update(parsed)
+
+
+async def seed_wallet_blockchain_state(wallet_address: str) -> None:
+    async with blockchain_lock:
+        chain_data = dict(blockchain)
+
+    if not chain_data:
+        await load_blockchain_once()
+        async with blockchain_lock:
+            chain_data = dict(blockchain)
+
+    if not chain_data:
+        raise HTTPException(status_code=503, detail="Backend blockchain snapshot is not loaded")
+
+    seeded_state = dict(chain_data)
+    seeded_state["wallet_address"] = wallet_address
+
+    UNCCOIN_BLOCKCHAINS_DIR.mkdir(parents=True, exist_ok=True)
+    target_path = UNCCOIN_BLOCKCHAINS_DIR / f"{wallet_address}.json"
+    target_path.write_text(json.dumps(seeded_state, indent=2), encoding="utf-8")
 
 
 async def refresh_loop() -> None:
@@ -802,6 +823,7 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
 
     async with node_command_lock:
         await verify_wallet_record_identity(wallet_record)
+        await seed_wallet_blockchain_state(wallet_record["wallet_address"])
         node_port = int(wallet_record["node_port"])
         runner = InteractiveNodeRunner(wallet_record["internal_wallet_name"], node_port)
 
