@@ -173,6 +173,24 @@ function buildWalletActivityFromBlockchain(
     return activity;
 }
 
+function collectKnownWalletAddresses(chainData: BlockchainResponse | null): string[] {
+    if (!chainData) {
+        return [];
+    }
+
+    const knownWalletAddresses = new Set(
+        [
+            chainData.wallet_address ?? "",
+            ...chainData.blocks.flatMap((block) => [
+                block.description,
+                ...block.transactions.flatMap((transaction) => [transaction.sender, transaction.receiver]),
+            ]),
+        ].filter((address) => address.trim().length > 0 && address !== "SYSTEM"),
+    );
+
+    return Array.from(knownWalletAddresses).sort((left, right) => left.localeCompare(right));
+}
+
 function formatBlockShare(count: number, total: number): string {
     if (total <= 0) {
         return "0%";
@@ -962,6 +980,7 @@ function WalletDashboardPage() {
     const [sendFee, setSendFee] = useState("0");
     const [sendStatus, setSendStatus] = useState("");
     const [isSending, setIsSending] = useState(false);
+    const [receiverOptions, setReceiverOptions] = useState<string[]>([]);
 
     useEffect(() => {
         const storedWalletToken = loadStoredWalletToken();
@@ -984,10 +1003,13 @@ function WalletDashboardPage() {
         const load = async () => {
             try {
                 const session = await getWalletSession(walletToken);
+                const chainData = await getBlockchain();
                 let nextWallet = session.wallet;
+                const knownAddresses = collectKnownWalletAddresses(chainData).filter(
+                    (address) => address !== session.wallet.wallet_address,
+                );
 
                 if (session.wallet.activity.length === 0 && session.wallet.transaction_count > 0) {
-                    const chainData = await getBlockchain();
                     const derivedActivity = buildWalletActivityFromBlockchain(session.wallet.wallet_address, chainData);
 
                     if (derivedActivity.length > 0) {
@@ -1002,6 +1024,7 @@ function WalletDashboardPage() {
                 if (active) {
                     setBrowserWallet(session.browser_wallet);
                     setWallet(nextWallet);
+                    setReceiverOptions(knownAddresses);
                     setLastUpdated(new Date());
                     setErrorMessage("");
                 }
@@ -1032,8 +1055,12 @@ function WalletDashboardPage() {
         }
 
         const session = await getWalletSession(walletToken);
+        const chainData = await getBlockchain();
         setBrowserWallet(session.browser_wallet);
         setWallet(session.wallet);
+        setReceiverOptions(
+            collectKnownWalletAddresses(chainData).filter((address) => address !== session.wallet.wallet_address),
+        );
         setLastUpdated(new Date());
         setErrorMessage("");
     };
@@ -1135,7 +1162,30 @@ function WalletDashboardPage() {
                                     setReceiverAddress(event.target.value);
                                 }}
                                 placeholder="Enter receiver wallet address"
+                                list="wallet-address-options"
                             />
+                            <datalist id="wallet-address-options">
+                                {receiverOptions.map((address) => (
+                                    <option key={address} value={address} />
+                                ))}
+                            </datalist>
+                        </label>
+                        <label className="wallet-login-field">
+                            <span className="chain-stat-label">Existing addresses</span>
+                            <select
+                                className="wallet-address-select"
+                                value={receiverAddress}
+                                onChange={(event) => {
+                                    setReceiverAddress(event.target.value);
+                                }}
+                            >
+                                <option value="">Select an existing address</option>
+                                {receiverOptions.map((address) => (
+                                    <option key={address} value={address}>
+                                        {address}
+                                    </option>
+                                ))}
+                            </select>
                         </label>
                         <div className="wallet-send-form-row">
                             <label className="wallet-login-field">

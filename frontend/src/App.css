@@ -734,6 +734,16 @@ body::-webkit-scrollbar-thumb {
   font: inherit;
 }
 
+.wallet-address-select {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 220, 156, 0.4);
+  background: rgba(20, 10, 4, 0.45);
+  color: #fff0c9;
+  font: inherit;
+}
+
 .wallet-login-actions {
   display: flex;
   justify-content: flex-start;
