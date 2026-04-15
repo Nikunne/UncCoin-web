@@ -137,14 +137,14 @@ async function parseError(response: Response): Promise<never> {
     throw new Error(typeof data?.detail === "string" ? data.detail : `Request failed: ${response.status}`);
 }
 
-export async function loginWithWallet(walletAddress: string, password: string): Promise<WalletSession> {
+export async function loginWithWallet(walletIdentifier: string, password: string): Promise<WalletSession> {
     const response = await fetch(`${API_BASE_URL}/wallet-login`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
         },
         body: JSON.stringify({
-            wallet_address: walletAddress,
+            wallet_address: walletIdentifier,
             password,
         }),
     });

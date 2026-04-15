@@ -416,6 +416,25 @@ async def get_browser_wallet(wallet_address: str) -> Dict[str, Any] | None:
         return dict(record) if record else None
 
 
+async def find_browser_wallet_by_login(login_identifier: str) -> Dict[str, Any] | None:
+    normalized_identifier = login_identifier.strip()
+    if not normalized_identifier:
+        return None
+
+    async with browser_wallets_lock:
+        direct_match = browser_wallets.get(normalized_identifier)
+        if direct_match:
+            return dict(direct_match)
+
+        lowered_identifier = normalized_identifier.casefold()
+        for record in browser_wallets.values():
+            wallet_name = record.get("wallet_name")
+            if isinstance(wallet_name, str) and wallet_name.casefold() == lowered_identifier:
+                return dict(record)
+
+    return None
+
+
 async def allocate_node_port() -> int:
     async with browser_wallets_lock:
         used_ports = {
@@ -716,20 +735,20 @@ async def get_blockchain() -> Dict[str, Any]:
 
 @app.post("/wallet-login")
 async def wallet_login(payload: WalletLoginRequest) -> BrowserWalletSessionResponse:
-    wallet_address = payload.wallet_address.strip()
+    login_identifier = payload.wallet_address.strip()
 
-    if not wallet_address:
-        raise HTTPException(status_code=400, detail="Wallet address is required")
+    if not login_identifier:
+        raise HTTPException(status_code=400, detail="Wallet name or address is required")
 
-    wallet_record = await get_browser_wallet(wallet_address)
+    wallet_record = await find_browser_wallet_by_login(login_identifier)
     if not wallet_record:
-        raise HTTPException(status_code=401, detail="Only wallets created in the browser can log in here")
+        raise HTTPException(status_code=401, detail="Unknown browser wallet name or address")
 
     if not verify_password(payload.password, wallet_record["password_salt"], wallet_record["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid wallet address or password")
+        raise HTTPException(status_code=401, detail="Invalid wallet name/address or password")
 
     token = await create_session_for_wallet(wallet_record)
-    summary = await get_wallet_summary(wallet_address, require_chain_presence=False)
+    summary = await get_wallet_summary(wallet_record["wallet_address"], require_chain_presence=False)
 
     return BrowserWalletSessionResponse(
         ok=True,

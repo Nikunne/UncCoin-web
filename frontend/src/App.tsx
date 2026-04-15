@@ -754,7 +754,7 @@ function HomePage() {
 
 function LoginPage() {
     const navigate = useNavigate();
-    const [walletAddress, setWalletAddress] = useState("");
+    const [walletIdentifier, setWalletIdentifier] = useState("");
     const [password, setPassword] = useState("");
     const [newWalletName, setNewWalletName] = useState("");
     const [newWalletPassword, setNewWalletPassword] = useState("");
@@ -777,7 +777,7 @@ function LoginPage() {
         setIsLoginSubmitting(true);
 
         try {
-            const session = await loginWithWallet(walletAddress.trim(), password);
+            const session = await loginWithWallet(walletIdentifier.trim(), password);
             persistWalletSession(session.token, session.browser_wallet);
             navigate("/wallet");
         } catch (error) {
@@ -907,15 +907,15 @@ function LoginPage() {
                     </div>
                     <form className="wallet-login-form" onSubmit={onLoginSubmit}>
                         <label className="wallet-login-field">
-                            <span className="chain-stat-label">Wallet address</span>
+                            <span className="chain-stat-label">Wallet name or address</span>
                             <input
                                 className="wallet-login-input"
-                                value={walletAddress}
+                                value={walletIdentifier}
                                 onChange={(event) => {
-                                    setWalletAddress(event.target.value);
+                                    setWalletIdentifier(event.target.value);
                                 }}
                                 autoComplete="username"
-                                placeholder="Paste a browser-created wallet address"
+                                placeholder="Enter wallet name or address"
                                 required
                             />
                         </label>
