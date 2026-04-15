@@ -7,6 +7,7 @@ import secrets
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict
 
@@ -33,6 +34,8 @@ OUTPUT_BLOCKCHAIN_PATH = "../UncCoin-web/backend/blockchain.json"
 PASSWORD_ITERATIONS = 240_000
 COMMAND_POLL_INTERVAL_SECONDS = 0.25
 SYNC_SETTLE_IDLE_SECONDS = float(os.getenv("UNC_SYNC_SETTLE_IDLE_SECONDS", "2.5"))
+SYNC_MAX_WAIT_SECONDS = int(os.getenv("UNC_SYNC_MAX_WAIT_SECONDS", "180"))
+BALANCE_POLL_INTERVAL_SECONDS = float(os.getenv("UNC_BALANCE_POLL_INTERVAL_SECONDS", "2"))
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
@@ -285,6 +288,18 @@ async def get_wallet_summary(wallet_address: str, require_chain_presence: bool =
 
     balance = await get_wallet_balance(wallet_address)
     return build_wallet_stats(wallet_address, balance or 0.0, chain_data)
+
+
+def parse_decimal_amount(value: str, field_name: str) -> Decimal:
+    try:
+        parsed = Decimal(value.strip())
+    except (AttributeError, InvalidOperation) as error:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a valid decimal number") from error
+
+    if parsed < 0:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be zero or greater")
+
+    return parsed
 
 
 def parse_penger_file(text: str) -> Dict[str, float]:
@@ -662,6 +677,7 @@ class InteractiveNodeRunner:
         ]
 
         deadline = asyncio.get_running_loop().time() + timeout_seconds
+        start_time = asyncio.get_running_loop().time()
         last_seen_sync_activity: float | None = None
         seen_sync_activity = False
         inspected_count = 0
@@ -683,6 +699,8 @@ class InteractiveNodeRunner:
             if seen_sync_activity and last_seen_sync_activity is not None:
                 if current_time - last_seen_sync_activity >= idle_seconds:
                     return
+            elif current_time - start_time >= idle_seconds:
+                return
 
             if self.process is not None and self.process.returncode is not None:
                 raise HTTPException(
@@ -695,6 +713,36 @@ class InteractiveNodeRunner:
                     status_code=504,
                     detail=f"Timed out waiting for blockchain sync to settle.\n{self.tail_output()}",
                 )
+
+            await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
+
+    async def query_wallet_balance(self) -> Decimal | None:
+        if self.process is None:
+            return None
+
+        marker_before = len(self.output_lines)
+        await self.send_command("balance")
+        deadline = asyncio.get_running_loop().time() + 10
+
+        while True:
+            output_snapshot = list(self.output_lines)
+            new_lines = output_snapshot[marker_before:]
+
+            for line in new_lines:
+                if "Balance for " not in line:
+                    continue
+
+                _, _, balance_text = line.rpartition(": ")
+                try:
+                    return Decimal(balance_text.strip())
+                except InvalidOperation:
+                    return None
+
+            if self.process is not None and self.process.returncode is not None:
+                return None
+
+            if asyncio.get_running_loop().time() >= deadline:
+                return None
 
             await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
 
@@ -750,6 +798,8 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
     if not receiver_address.strip():
         raise HTTPException(status_code=400, detail="Receiver wallet address is required")
 
+    required_total = parse_decimal_amount(amount, "Amount") + parse_decimal_amount(fee, "Fee")
+
     async with node_command_lock:
         await verify_wallet_record_identity(wallet_record)
         node_port = int(wallet_record["node_port"])
@@ -770,7 +820,25 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
                     detail = output.rsplit("Invalid add-peer command:", maxsplit=1)[-1].strip()
                     raise HTTPException(status_code=400, detail=f"Peer connection failed: {detail}")
             await runner.send_command("sync")
-            await runner.wait_for_sync_settle(timeout_seconds=max(SYNC_WAIT_SECONDS, 45))
+            sync_deadline = asyncio.get_running_loop().time() + max(SYNC_WAIT_SECONDS, SYNC_MAX_WAIT_SECONDS)
+            while True:
+                current_balance = await runner.query_wallet_balance()
+                if current_balance is not None and current_balance >= required_total:
+                    break
+
+                if asyncio.get_running_loop().time() >= sync_deadline:
+                    raise HTTPException(
+                        status_code=504,
+                        detail=(
+                            "Timed out waiting for the wallet balance to sync high enough for this transaction.\n"
+                            f"Needed: {required_total}\n"
+                            f"Current balance: {current_balance if current_balance is not None else 'unknown'}\n"
+                            f"{runner.tail_output()}"
+                        ),
+                    )
+
+                await runner.wait_for_sync_settle(timeout_seconds=15)
+                await asyncio.sleep(BALANCE_POLL_INTERVAL_SECONDS)
             await runner.send_command(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
             tx_result = await runner.wait_for_output(
                 success_markers=["Broadcast transaction "],
