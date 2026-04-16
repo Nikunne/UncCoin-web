@@ -9,20 +9,25 @@ import subprocess
 import threading
 import time
 import sys
+import signal
 from pathlib import Path
 
 WORKDIR = Path("/home/hus/krypto/UncCoin")
 START_CMD = ["./scripts/run.sh", "riggaagent", "4040"]
 PEER_CMD = "add-peer 100.71.105.5:4000"
+QUIT_CMD = "quit"
 SYNC_CMD = "sync"
 BALANCE_CMD = "txtbalances ./penger.txt"
 BLOCKCHAIN_CMD = "txtblockchain ./blockchain.json"
+BLOCKCHAIN_PATH = WORKDIR / "blockchain.json"
 INITIAL_WAIT_SECONDS = 20
 POST_PEER_WAIT_SECONDS = 60
 LOOP_INTERVAL_SECONDS = 5
 PEER_REFRESH_INTERVAL_SECONDS = 120
 RESTART_INTERVAL_SECONDS = 1800
 SYNC_INTERVAL_SECONDS = 600
+BLOCKCHAIN_SAVE_WAIT_SECONDS = 30
+STOP_WAIT_SECONDS = 10
 
 
 def stream_output(pipe, prefix):
@@ -57,13 +62,37 @@ def start_node():
     return proc
 
 
+def get_blockchain_mtime():
+    try:
+        return BLOCKCHAIN_PATH.stat().st_mtime
+    except FileNotFoundError:
+        return None
+
+
+def wait_for_blockchain_save(previous_mtime):
+    deadline = time.monotonic() + BLOCKCHAIN_SAVE_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        current_mtime = get_blockchain_mtime()
+        if current_mtime is not None and current_mtime != previous_mtime:
+            print("[agent] blockchain.json updated after quit")
+            return
+        time.sleep(1)
+    print("[agent] timed out waiting for blockchain.json update", file=sys.stderr)
+
+
 def stop_node(proc):
+    previous_mtime = get_blockchain_mtime()
     try:
         if proc.poll() is None:
-            proc.terminate()
-            proc.wait(timeout=10)
+            send_command(proc, QUIT_CMD)
+            wait_for_blockchain_save(previous_mtime)
+        if proc.poll() is None:
+            print("[agent] sending Ctrl+C to stop node")
+            proc.send_signal(signal.SIGINT)
+            proc.wait(timeout=STOP_WAIT_SECONDS)
     except Exception:
-        proc.kill()
+        if proc.poll() is None:
+            proc.kill()
 
 
 def connect_peer(proc):
