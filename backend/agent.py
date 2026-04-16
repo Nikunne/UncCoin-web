@@ -13,7 +13,7 @@ from pathlib import Path
 
 WORKDIR = Path("/home/hus/krypto/UncCoin")
 START_CMD = ["./scripts/run.sh", "riggaagent", "4040"]
-PEER_CMD = "add-peer 00.71.105.5:4000"
+PEER_CMD = "add-peer 100.71.105.5:4000"
 SYNC_CMD = "sync"
 BALANCE_CMD = "txtbalances ./penger.txt"
 BLOCKCHAIN_CMD = "txtblockchain ./blockchain.json"
