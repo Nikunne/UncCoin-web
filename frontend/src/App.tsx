@@ -98,6 +98,7 @@ function collectKnownWalletAddresses(chainData: BlockchainResponse | null): stri
     const knownWalletAddresses = new Set(
         [
             chainData.wallet_address ?? "",
+            ...Object.keys(chainData.wallet_names ?? {}),
             ...chainData.blocks.flatMap((block) =>
                 block.transactions.flatMap((transaction) => [transaction.sender, transaction.receiver]),
             ),
@@ -1064,7 +1065,7 @@ function WalletDashboardPage() {
         }
 
         if (!knownReceiverAddresses.includes(trimmedReceiverAddress)) {
-            setErrorMessage("Receiver address does not exist on-chain");
+            setErrorMessage("Receiver address is not a known wallet");
             setIsSending(false);
             return;
         }

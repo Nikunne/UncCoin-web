@@ -358,6 +358,10 @@ async def ensure_wallet_exists_on_chain(wallet_address: str) -> None:
     if not normalized_address:
         raise HTTPException(status_code=400, detail="Receiver wallet address is required")
 
+    browser_wallet = await get_browser_wallet(normalized_address)
+    if browser_wallet:
+        return
+
     async with blockchain_lock:
         chain_data = dict(blockchain)
 
@@ -367,7 +371,7 @@ async def ensure_wallet_exists_on_chain(wallet_address: str) -> None:
             chain_data = dict(blockchain)
 
     if normalized_address not in collect_wallet_addresses(chain_data):
-        raise HTTPException(status_code=400, detail="Receiver wallet address does not exist on-chain")
+        raise HTTPException(status_code=400, detail="Receiver wallet address is not a known wallet")
 
 
 async def get_bonus_amount_setting() -> str:
