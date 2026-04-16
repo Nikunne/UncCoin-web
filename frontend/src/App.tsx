@@ -960,7 +960,6 @@ function WalletDashboardPage() {
     const [sendStatus, setSendStatus] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [receiverOptions, setReceiverOptions] = useState<string[]>([]);
-    const [knownReceiverAddresses, setKnownReceiverAddresses] = useState<string[]>([]);
 
     useEffect(() => {
         const storedWalletToken = loadStoredWalletToken();
@@ -993,7 +992,6 @@ function WalletDashboardPage() {
                     setBrowserWallet(session.browser_wallet);
                     setWallet(session.wallet);
                     setReceiverOptions(knownAddresses);
-                    setKnownReceiverAddresses(allKnownAddresses);
                     setLastUpdated(new Date());
                     setErrorMessage("");
                 }
@@ -1028,7 +1026,6 @@ function WalletDashboardPage() {
         const allKnownAddresses = collectKnownWalletAddresses(chainData);
         setBrowserWallet(session.browser_wallet);
         setWallet(session.wallet);
-        setKnownReceiverAddresses(allKnownAddresses);
         setReceiverOptions(allKnownAddresses.filter((address) => address !== session.wallet.wallet_address));
         setLastUpdated(new Date());
         setErrorMessage("");
@@ -1060,12 +1057,6 @@ function WalletDashboardPage() {
         const trimmedReceiverAddress = receiverAddress.trim();
         if (!trimmedReceiverAddress) {
             setErrorMessage("Receiver address is required");
-            setIsSending(false);
-            return;
-        }
-
-        if (!knownReceiverAddresses.includes(trimmedReceiverAddress)) {
-            setErrorMessage("Receiver address is not a known wallet");
             setIsSending(false);
             return;
         }
