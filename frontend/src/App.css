@@ -600,6 +600,9 @@ body::-webkit-scrollbar-thumb {
 
 .blockchain-distribution-address {
   display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .blockchain-distribution-subtitle {
@@ -808,6 +811,19 @@ body::-webkit-scrollbar-thumb {
   gap: 18px;
 }
 
+.wallet-maintainer-note {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 220, 156, 0.25);
+  background: rgba(255, 246, 215, 0.06);
+  color: #fff0c9;
+}
+
+.wallet-maintainer-note-hero {
+  margin-top: 14px;
+  max-width: 720px;
+}
+
 .wallet-send-form-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1014,10 +1030,10 @@ body::-webkit-scrollbar-thumb {
 }
 
 .transaction-row-compact {
-  grid-template-columns: minmax(0, 1.8fr) auto minmax(140px, 0.9fr);
+  grid-template-columns: minmax(0, 1.9fr) minmax(70px, 0.28fr) minmax(90px, 0.32fr) minmax(150px, 0.8fr);
   gap: 6px 12px;
   padding: 7px 9px;
-  align-items: center;
+  align-items: start;
 }
 
 .block-card-compact .block-card-header {
@@ -1048,20 +1064,25 @@ body::-webkit-scrollbar-thumb {
 }
 
 .transaction-route-values {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   min-width: 0;
 }
 
 .transaction-route-values .hash-value {
   min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .transaction-route-arrow {
   flex-shrink: 0;
   color: #cda976;
   font-size: 0.8rem;
+  padding-top: 0.1rem;
 }
 
 .block-card-compact .block-id {
@@ -1101,9 +1122,78 @@ body::-webkit-scrollbar-thumb {
 }
 
 .transaction-amount,
+.transaction-fee,
 .transaction-time,
 .empty-state {
   color: #fff0c9;
+}
+
+.transaction-metric {
+  min-width: 0;
+}
+
+.transaction-fee {
+  display: block;
+  min-height: 1.05rem;
+}
+
+.bonus-dashboard-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.bonus-dashboard-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 5, 2, 0.74);
+  backdrop-filter: blur(6px);
+}
+
+.bonus-dashboard-panel {
+  position: relative;
+  z-index: 1;
+  width: min(560px, 100%);
+  padding: 20px;
+  border: 1px solid rgba(255, 220, 156, 0.34);
+  background:
+    radial-gradient(circle at top, rgba(137, 84, 32, 0.28), transparent 58%),
+    rgba(32, 14, 5, 0.96);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+}
+
+.bonus-dashboard-kicker {
+  margin: 0 0 8px;
+  color: #f2c978;
+  letter-spacing: 0.14rem;
+  text-transform: uppercase;
+}
+
+.bonus-dashboard-title {
+  margin: 0;
+  color: #fff0c9;
+}
+
+.bonus-dashboard-copy {
+  margin: 10px 0 14px;
+  color: #f0d4a0;
+}
+
+.bonus-dashboard-address {
+  display: block;
+  margin-bottom: 16px;
+  color: #ffe9bf;
+  overflow-wrap: anywhere;
+}
+
+.bonus-dashboard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .blockchain-loading-more {
@@ -1442,6 +1532,15 @@ body::-webkit-scrollbar-thumb {
     grid-template-columns: 1fr;
     align-items: flex-start;
   }
+
+  .transaction-route-values {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .transaction-route-arrow {
+    display: none;
+  }
 }
 
 @media (max-width: 700px) {
@@ -1535,6 +1634,10 @@ body::-webkit-scrollbar-thumb {
 
   .wallet-send-form-row {
     grid-template-columns: 1fr;
+  }
+
+  .bonus-dashboard-actions {
+    flex-direction: column;
   }
 
   .chain-wallet-card-header {

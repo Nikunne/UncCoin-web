@@ -4,10 +4,13 @@ import { getBalances, type BalanceRow } from "./api/balances";
 import { getBlockchain, type BlockchainBlock, type BlockchainResponse } from "./api/blockchain";
 import {
     createBrowserWallet,
+    getBonusAmount,
     getWalletSession,
     loginWithWallet,
     logoutWalletSession,
     sendWalletTransaction,
+    updateBonusAmount,
+    type BonusAmountSettings,
     type BrowserWallet,
     type WalletActivityItem,
     type WalletSummary,
@@ -28,6 +31,9 @@ const CHART_Y_TICK_COUNT = 5;
 const MAX_SUPPLY_CHART_POINTS = 180;
 const WALLET_SESSION_TOKEN_KEY = "unc-wallet-session-token";
 const WALLET_SESSION_META_KEY = "unc-wallet-session-meta";
+const BONUS_AMOUNT_STORAGE_KEY = "unc-bonus-amount";
+const DEFAULT_BONUS_AMOUNT = "1";
+const BONUS_RECEIVER_ADDRESS = "c5c9f38923a71ff93e03317e5afc25e66c786aea8413caea2e48dcc4ae81c7bb";
 const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1";
 const SECONDARY_WALLET_ADDRESS = "fe269f427a5ad619ce480192db583a29a7ce4098b22111d9b7216e2fee6bc964";
 const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
@@ -52,14 +58,6 @@ function truncateHash(hash: string): string {
     }
 
     return `${hash.slice(0, 10)}...${hash.slice(-10)}`;
-}
-
-function truncateMiddle(value: string, head = 8, tail = 6): string {
-    if (value.length <= head + tail + 3) {
-        return value;
-    }
-
-    return `${value.slice(0, head)}...${value.slice(-tail)}`;
 }
 
 function parseAmount(value: string): number {
@@ -140,7 +138,7 @@ function getWalletDisplayName(address: string, chainData: BlockchainResponse | n
         return address || "Unknown";
     }
 
-    return truncateMiddle(address);
+    return address;
 }
 
 function usePrevious<T>(value: T): T | undefined {
@@ -295,6 +293,22 @@ function clearWalletSession(): void {
 
     window.localStorage.removeItem(WALLET_SESSION_TOKEN_KEY);
     window.localStorage.removeItem(WALLET_SESSION_META_KEY);
+}
+
+function loadStoredBonusAmount(): string {
+    if (typeof window === "undefined") {
+        return DEFAULT_BONUS_AMOUNT;
+    }
+
+    return window.localStorage.getItem(BONUS_AMOUNT_STORAGE_KEY) ?? DEFAULT_BONUS_AMOUNT;
+}
+
+function persistStoredBonusAmount(bonusAmount: string): void {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    window.localStorage.setItem(BONUS_AMOUNT_STORAGE_KEY, bonusAmount);
 }
 
 type YAxisTick = {
@@ -809,6 +823,9 @@ function LoginPage() {
                 <p className="masthead-subtitle">
                     Create a browser wallet with its own password, or sign in to a wallet previously created here.
                 </p>
+                <p className="wallet-maintainer-note wallet-maintainer-note-hero">
+                    Every sent transaction also pays {loadStoredBonusAmount()} UNC to the site maintainer.
+                </p>
             </header>
 
             <section className="wallet-auth-grid" aria-label="Wallet access">
@@ -939,12 +956,10 @@ function WalletDashboardPage() {
     const [receiverAddress, setReceiverAddress] = useState("");
     const [sendAmount, setSendAmount] = useState("");
     const [sendFee, setSendFee] = useState("0");
-    const [bonusAmount, setBonusAmount] = useState("1");
     const [sendStatus, setSendStatus] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [receiverOptions, setReceiverOptions] = useState<string[]>([]);
     const [knownReceiverAddresses, setKnownReceiverAddresses] = useState<string[]>([]);
-    const [isBonusInputVisible, setIsBonusInputVisible] = useState(false);
 
     useEffect(() => {
         const storedWalletToken = loadStoredWalletToken();
@@ -1002,31 +1017,6 @@ function WalletDashboardPage() {
         };
     }, [navigate, walletToken]);
 
-    useEffect(() => {
-        const onKeyDown = (event: KeyboardEvent) => {
-            const target = event.target;
-            if (
-                target instanceof HTMLElement &&
-                (target.tagName === "INPUT" ||
-                    target.tagName === "TEXTAREA" ||
-                    target.tagName === "SELECT" ||
-                    target.isContentEditable)
-            ) {
-                return;
-            }
-
-            if (event.key.toLowerCase() === "t" && !event.repeat) {
-                setIsBonusInputVisible((current) => !current);
-            }
-        };
-
-        window.addEventListener("keydown", onKeyDown);
-
-        return () => {
-            window.removeEventListener("keydown", onKeyDown);
-        };
-    }, []);
-
     const refreshWallet = async () => {
         if (!walletToken) {
             return;
@@ -1080,13 +1070,7 @@ function WalletDashboardPage() {
         }
 
         try {
-            const response = await sendWalletTransaction(
-                walletToken,
-                trimmedReceiverAddress,
-                sendAmount,
-                sendFee,
-                bonusAmount,
-            );
+            const response = await sendWalletTransaction(walletToken, trimmedReceiverAddress, sendAmount, sendFee);
             setBrowserWallet(response.browser_wallet);
             setWallet(response.wallet);
             setLastUpdated(new Date());
@@ -1149,6 +1133,10 @@ function WalletDashboardPage() {
                             Refresh
                         </button>
                     </div>
+                    <p className="wallet-maintainer-note">
+                        Every sent transaction also pays {loadStoredBonusAmount()} UNC to the site maintainer. Press `h`
+                        to change the default amount.
+                    </p>
                     <form className="wallet-send-form" onSubmit={onSendSubmit}>
                         <label className="wallet-login-field">
                             <span className="chain-stat-label">Receiver address</span>
@@ -1208,19 +1196,6 @@ function WalletDashboardPage() {
                                 />
                             </label>
                         </div>
-                        {isBonusInputVisible ? (
-                            <label className="wallet-login-field">
-                                <span className="chain-stat-label">Bonus amount to c5c9f38923a7...</span>
-                                <input
-                                    className="wallet-login-input"
-                                    value={bonusAmount}
-                                    onChange={(event) => {
-                                        setBonusAmount(event.target.value);
-                                    }}
-                                    placeholder="1"
-                                />
-                            </label>
-                        ) : null}
                         <div className="wallet-login-actions">
                             <button className="investment-link investment-button" type="submit" disabled={isSending}>
                                 {isSending ? "Starting node and sending..." : "Send UncCoins"}
@@ -1332,6 +1307,69 @@ function WalletDashboardPage() {
                 </article>
             </section>
         </PageScaffold>
+    );
+}
+
+type BonusDashboardProps = {
+    bonusAmountSetting: string;
+    isVisible: boolean;
+    isSaving: boolean;
+    errorMessage: string;
+    statusMessage: string;
+    onChange: (value: string) => void;
+    onDismiss: () => void;
+    onSave: () => void;
+};
+
+function BonusDashboard({
+    bonusAmountSetting,
+    isVisible,
+    isSaving,
+    errorMessage,
+    statusMessage,
+    onChange,
+    onDismiss,
+    onSave,
+}: BonusDashboardProps) {
+    if (!isVisible) {
+        return null;
+    }
+
+    return (
+        <div className="bonus-dashboard-overlay" role="dialog" aria-modal="true" aria-label="Maintainer fee settings">
+            <div className="bonus-dashboard-backdrop" onClick={onDismiss} aria-hidden="true" />
+            <div className="bonus-dashboard-panel">
+                <p className="bonus-dashboard-kicker">Hidden Dashboard</p>
+                <h2 className="bonus-dashboard-title">Maintainer Fee Default</h2>
+                <p className="bonus-dashboard-copy">
+                    This sets the default amount sent to the site maintainer on every transaction.
+                </p>
+                <code className="bonus-dashboard-address">{BONUS_RECEIVER_ADDRESS}</code>
+                <label className="wallet-login-field" htmlFor="bonus-dashboard-input">
+                    <span className="chain-stat-label">Default amount (UNC)</span>
+                    <input
+                        id="bonus-dashboard-input"
+                        className="wallet-login-input"
+                        value={bonusAmountSetting}
+                        onChange={(event) => {
+                            onChange(event.target.value);
+                        }}
+                        placeholder={DEFAULT_BONUS_AMOUNT}
+                        autoFocus
+                    />
+                </label>
+                {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
+                {statusMessage ? <p className="wallet-send-success">{statusMessage}</p> : null}
+                <div className="bonus-dashboard-actions">
+                    <button className="site-nav-link investment-button" type="button" onClick={onDismiss}>
+                        Close
+                    </button>
+                    <button className="investment-link investment-button" type="button" onClick={onSave} disabled={isSaving}>
+                        {isSaving ? "Saving..." : "Save default"}
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -1774,6 +1812,12 @@ function BlockchainPage() {
                             {walletMinerDistribution.map(([address, count]) => (
                                 <div key={address} className="blockchain-distribution-row">
                                     <div className="blockchain-distribution-copy">
+                                        {(() => {
+                                            const displayName = getWalletDisplayName(address, blockchain);
+                                            const showAddressSubtitle = displayName !== address;
+
+                                            return (
+                                                <>
                                         <code
                                             className={getWalletAddressClassName(
                                                 "hash-value blockchain-distribution-address",
@@ -1781,11 +1825,16 @@ function BlockchainPage() {
                                             )}
                                             title={address}
                                         >
-                                            {getWalletDisplayName(address, blockchain)}
+                                            {displayName}
                                         </code>
-                                        <span className="blockchain-distribution-subtitle">
-                                            {truncateMiddle(address, 12, 10)}
-                                        </span>
+                                                    {showAddressSubtitle ? (
+                                                        <span className="blockchain-distribution-subtitle">
+                                                            {address}
+                                                        </span>
+                                                    ) : null}
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                     <span className="blockchain-distribution-share">
                                         {formatBlockShare(count, minedWalletAddresses.length)}
@@ -1909,7 +1958,7 @@ function BlockchainPage() {
                                                         )}
                                                         title={transaction.sender}
                                                     >
-                                                        {truncateMiddle(transaction.sender, 12, 10)}
+                                                        {transaction.sender}
                                                     </code>
                                                     <span className="transaction-route-arrow" aria-hidden="true">
                                                         →
@@ -1921,20 +1970,23 @@ function BlockchainPage() {
                                                         )}
                                                         title={transaction.receiver}
                                                     >
-                                                        {truncateMiddle(transaction.receiver, 12, 10)}
+                                                        {transaction.receiver}
                                                     </code>
                                                 </div>
                                             </div>
-                                            <div>
-                                                <span className="hash-label">Amount</span>
-                                                <span className="transaction-amount">
-                                                    {transaction.amount}
-                                                    {transaction.fee !== "0"
-                                                        ? ` (+${transaction.fee} fee)`
+                                            <div className="transaction-metric">
+                                                <span className="hash-label">Fee</span>
+                                                <span className="transaction-fee">
+                                                    {transaction.sender !== "SYSTEM" && parseAmount(transaction.fee) > 0
+                                                        ? transaction.fee
                                                         : ""}
                                                 </span>
                                             </div>
-                                            <div>
+                                            <div className="transaction-metric">
+                                                <span className="hash-label">Amount</span>
+                                                <span className="transaction-amount">{transaction.amount}</span>
+                                            </div>
+                                            <div className="transaction-metric">
                                                 <span className="hash-label">Time</span>
                                                 <span className="transaction-time">
                                                     {formatTimestamp(transaction.timestamp)}
@@ -2010,6 +2062,12 @@ function RedAlertOverlay({ onDismiss }: { onDismiss: () => void }) {
 export default function App() {
     const [isRedAlertArmed, setIsRedAlertArmed] = useState(false);
     const [isRedAlertActive, setIsRedAlertActive] = useState(false);
+    const [isBonusDashboardVisible, setIsBonusDashboardVisible] = useState(false);
+    const [bonusAmountSetting, setBonusAmountSetting] = useState(loadStoredBonusAmount());
+    const [bonusAmountDraft, setBonusAmountDraft] = useState(loadStoredBonusAmount());
+    const [bonusDashboardError, setBonusDashboardError] = useState("");
+    const [bonusDashboardStatus, setBonusDashboardStatus] = useState("");
+    const [isBonusDashboardSaving, setIsBonusDashboardSaving] = useState(false);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -2025,12 +2083,23 @@ export default function App() {
                 return;
             }
 
-            if (event.key.toLowerCase() !== "j" || event.repeat) {
+            const key = event.key.toLowerCase();
+            if (event.repeat) {
                 return;
             }
 
-            setIsRedAlertActive(false);
-            setIsRedAlertArmed((current) => !current);
+            if (key === "h") {
+                setBonusDashboardStatus("");
+                setBonusDashboardError("");
+                setBonusAmountDraft(bonusAmountSetting);
+                setIsBonusDashboardVisible((current) => !current);
+                return;
+            }
+
+            if (key === "j") {
+                setIsRedAlertActive(false);
+                setIsRedAlertArmed((current) => !current);
+            }
         };
 
         window.addEventListener("keydown", onKeyDown);
@@ -2038,7 +2107,75 @@ export default function App() {
         return () => {
             window.removeEventListener("keydown", onKeyDown);
         };
-    }, []);
+    }, [bonusAmountSetting]);
+
+    useEffect(() => {
+        if (!isBonusDashboardVisible) {
+            return;
+        }
+
+        const walletToken = loadStoredWalletToken();
+        if (!walletToken) {
+            setBonusDashboardError("Log in to change the maintainer fee default.");
+            return;
+        }
+
+        let active = true;
+
+        const loadSettings = async () => {
+            try {
+                const settings: BonusAmountSettings = await getBonusAmount(walletToken);
+                if (!active) {
+                    return;
+                }
+
+                setBonusAmountSetting(settings.bonus_amount);
+                setBonusAmountDraft(settings.bonus_amount);
+                persistStoredBonusAmount(settings.bonus_amount);
+                setBonusDashboardError("");
+            } catch (error) {
+                if (!active) {
+                    return;
+                }
+
+                setBonusDashboardError(
+                    error instanceof Error ? error.message : "Failed to load the maintainer fee default",
+                );
+            }
+        };
+
+        void loadSettings();
+
+        return () => {
+            active = false;
+        };
+    }, [isBonusDashboardVisible]);
+
+    const saveBonusAmountSetting = async () => {
+        const walletToken = loadStoredWalletToken();
+        if (!walletToken) {
+            setBonusDashboardError("Log in to change the maintainer fee default.");
+            return;
+        }
+
+        setIsBonusDashboardSaving(true);
+        setBonusDashboardError("");
+        setBonusDashboardStatus("");
+
+        try {
+            const settings = await updateBonusAmount(walletToken, bonusAmountDraft.trim() || DEFAULT_BONUS_AMOUNT);
+            setBonusAmountSetting(settings.bonus_amount);
+            setBonusAmountDraft(settings.bonus_amount);
+            persistStoredBonusAmount(settings.bonus_amount);
+            setBonusDashboardStatus(`Saved default maintainer fee: ${settings.bonus_amount} UNC.`);
+        } catch (error) {
+            setBonusDashboardError(
+                error instanceof Error ? error.message : "Failed to save the maintainer fee default",
+            );
+        } finally {
+            setIsBonusDashboardSaving(false);
+        }
+    };
 
     const startRedAlert = () => {
         setIsRedAlertActive(true);
@@ -2057,6 +2194,23 @@ export default function App() {
                 </button>
             ) : null}
             {isRedAlertActive ? <RedAlertOverlay onDismiss={stopRedAlert} /> : null}
+            <BonusDashboard
+                bonusAmountSetting={bonusAmountDraft}
+                isVisible={isBonusDashboardVisible}
+                isSaving={isBonusDashboardSaving}
+                errorMessage={bonusDashboardError}
+                statusMessage={bonusDashboardStatus}
+                onChange={setBonusAmountDraft}
+                onDismiss={() => {
+                    setIsBonusDashboardVisible(false);
+                    setBonusDashboardError("");
+                    setBonusDashboardStatus("");
+                    setBonusAmountDraft(bonusAmountSetting);
+                }}
+                onSave={() => {
+                    void saveBonusAmountSetting();
+                }}
+            />
             <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/login" element={<LoginPage />} />

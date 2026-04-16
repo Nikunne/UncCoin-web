@@ -37,6 +37,10 @@ export type WalletSession = {
     wallet: WalletSummary;
 };
 
+export type BonusAmountSettings = {
+    bonus_amount: string;
+};
+
 type WalletSessionApiResponse = {
     ok: boolean;
     token?: string;
@@ -114,6 +118,14 @@ function normalizeWalletSessionResponse(value: unknown): WalletSessionApiRespons
         browser_wallet: normalizeBrowserWallet(response.browser_wallet),
         wallet: normalizeWalletSummary(response.wallet),
         command_output: typeof response.command_output === "string" ? response.command_output : undefined,
+    };
+}
+
+function normalizeBonusAmountSettings(value: unknown): BonusAmountSettings {
+    const response = (value ?? {}) as Partial<BonusAmountSettings>;
+
+    return {
+        bonus_amount: typeof response.bonus_amount === "string" ? response.bonus_amount : "1",
     };
 }
 
@@ -229,7 +241,6 @@ export async function sendWalletTransaction(
     receiverAddress: string,
     amount: string,
     fee: string,
-    bonusAmount: string,
 ): Promise<Omit<WalletSession, "token"> & { command_output?: string }> {
     const response = await fetch(`${API_BASE_URL}/wallet-send`, {
         method: "POST",
@@ -241,7 +252,6 @@ export async function sendWalletTransaction(
             receiver_address: receiverAddress,
             amount,
             fee,
-            bonus_amount: bonusAmount,
         }),
     });
 
@@ -265,4 +275,37 @@ export async function getWalletSummary(walletAddress: string): Promise<WalletSum
     }
 
     return normalizeWalletSummary(await response.json());
+}
+
+export async function getBonusAmount(token: string): Promise<BonusAmountSettings> {
+    const response = await fetch(`${API_BASE_URL}/bonus-amount`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+
+    if (!response.ok) {
+        await parseError(response);
+    }
+
+    return normalizeBonusAmountSettings(await response.json());
+}
+
+export async function updateBonusAmount(token: string, bonusAmount: string): Promise<BonusAmountSettings> {
+    const response = await fetch(`${API_BASE_URL}/bonus-amount`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+            bonus_amount: bonusAmount,
+        }),
+    });
+
+    if (!response.ok) {
+        await parseError(response);
+    }
+
+    return normalizeBonusAmountSettings(await response.json());
 }
