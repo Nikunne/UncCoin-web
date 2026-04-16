@@ -20,6 +20,7 @@ WEB_ROOT = BASE_DIR.parent
 UNCCOIN_REPO = (WEB_ROOT.parent / "UncCoin").resolve()
 UNCCOIN_RUN_SCRIPT = UNCCOIN_REPO / "scripts" / "run.sh"
 UNCCOIN_BLOCKCHAINS_DIR = UNCCOIN_REPO / "state" / "blockchains"
+UNCCOIN_WALLETS_DIR = UNCCOIN_REPO / "state" / "wallets"
 PENGER_FILE = BASE_DIR / "penger.txt"
 BLOCKCHAIN_FILE = BASE_DIR / "blockchain.json"
 BROWSER_WALLETS_FILE = BASE_DIR / "browser_wallets.json"
@@ -146,6 +147,23 @@ def sanitize_wallet_label(wallet_name: str) -> str:
     lowered = wallet_name.strip().lower().replace("_", "-").replace(" ", "-")
     normalized = WALLET_NAME_PATTERN.sub("-", lowered).strip("-")
     return normalized or "browser-wallet"
+
+
+def get_unccoin_wallet_file(wallet_name: str) -> Path:
+    return UNCCOIN_WALLETS_DIR / f"{wallet_name}.json"
+
+
+def load_unccoin_wallet_file(wallet_name: str) -> Dict[str, Any] | None:
+    wallet_path = get_unccoin_wallet_file(wallet_name)
+    if not wallet_path.exists():
+        return None
+
+    try:
+        parsed = json.loads(wallet_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    return parsed if isinstance(parsed, dict) else None
 
 
 def hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
@@ -531,6 +549,19 @@ async def get_browser_wallet(wallet_address: str) -> Dict[str, Any] | None:
         return dict(record) if record else None
 
 
+async def update_browser_wallet_internal_name(wallet_address: str, internal_wallet_name: str) -> None:
+    updated = False
+
+    async with browser_wallets_lock:
+        record = browser_wallets.get(wallet_address)
+        if isinstance(record, dict) and record.get("internal_wallet_name") != internal_wallet_name:
+            record["internal_wallet_name"] = internal_wallet_name
+            updated = True
+
+    if updated:
+        await save_browser_wallets_file()
+
+
 async def find_browser_wallet_by_login(login_identifier: str) -> Dict[str, Any] | None:
     normalized_identifier = login_identifier.strip()
     if not normalized_identifier:
@@ -645,10 +676,40 @@ async def create_unccoin_wallet(wallet_label: str) -> tuple[str, str]:
     if exit_code != 0:
         raise HTTPException(status_code=500, detail=f"Wallet creation failed:\n{output.strip()}")
 
+    wallet_path = get_unccoin_wallet_file(internal_wallet_name)
+    saved_path_line = next((line for line in output.splitlines() if line.startswith("Saved to: ")), "")
     address_line = next((line for line in output.splitlines() if line.startswith("Address: ")), "")
     wallet_address = address_line.replace("Address: ", "", 1).strip()
     if not wallet_address:
         raise HTTPException(status_code=500, detail=f"Could not parse wallet address from output:\n{output.strip()}")
+
+    if saved_path_line:
+        reported_path = Path(saved_path_line.replace("Saved to: ", "", 1).strip())
+        if not reported_path.is_absolute():
+            reported_path = (UNCCOIN_REPO / reported_path).resolve()
+
+        if reported_path != wallet_path.resolve():
+            wallet_path = reported_path
+
+    if not wallet_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Wallet creation completed without a persisted wallet file. "
+                f"Expected wallet at {wallet_path}.\n{output.strip()}"
+            ),
+        )
+
+    wallet_data = load_unccoin_wallet_file(wallet_path.stem)
+    persisted_wallet_address = str((wallet_data or {}).get("address", "")).strip()
+    if persisted_wallet_address and persisted_wallet_address != wallet_address:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Wallet creation returned an address that does not match the persisted wallet file. "
+                f"CLI reported {wallet_address}, but {wallet_path.name} contains {persisted_wallet_address}."
+            ),
+        )
 
     return internal_wallet_name, wallet_address
 
@@ -674,8 +735,72 @@ async def resolve_unccoin_wallet_address(wallet_name: str) -> str:
     return wallet_address
 
 
+async def reconcile_browser_wallet_internal_name(wallet_record: Dict[str, Any]) -> str:
+    stored_wallet_name = str(wallet_record.get("internal_wallet_name", "")).strip()
+    expected_wallet_address = str(wallet_record.get("wallet_address", "")).strip()
+    display_wallet_name = str(wallet_record.get("wallet_name", "")).strip()
+    candidate_names: list[str] = []
+
+    def add_candidate(name: str) -> None:
+        normalized = name.strip()
+        if normalized and normalized not in candidate_names:
+            candidate_names.append(normalized)
+
+    add_candidate(stored_wallet_name)
+    add_candidate(display_wallet_name)
+
+    sanitized_label = sanitize_wallet_label(display_wallet_name)
+    add_candidate(sanitized_label)
+    add_candidate(f"browser-{sanitized_label}")
+
+    for candidate in candidate_names:
+        wallet_data = load_unccoin_wallet_file(candidate)
+        if not wallet_data:
+            continue
+
+        candidate_address = str(wallet_data.get("address", "")).strip()
+        if expected_wallet_address and candidate_address == expected_wallet_address:
+            if candidate != stored_wallet_name:
+                await update_browser_wallet_internal_name(expected_wallet_address, candidate)
+                wallet_record["internal_wallet_name"] = candidate
+            return candidate
+
+    if UNCCOIN_WALLETS_DIR.exists():
+        prefix = f"browser-{sanitized_label}-"
+
+        for wallet_path in sorted(UNCCOIN_WALLETS_DIR.glob("*.json")):
+            wallet_data = load_unccoin_wallet_file(wallet_path.stem)
+            if not wallet_data:
+                continue
+
+            candidate_name = str(wallet_data.get("name", wallet_path.stem)).strip() or wallet_path.stem
+            candidate_address = str(wallet_data.get("address", "")).strip()
+
+            if expected_wallet_address and candidate_address == expected_wallet_address:
+                if candidate_name != stored_wallet_name:
+                    await update_browser_wallet_internal_name(expected_wallet_address, candidate_name)
+                    wallet_record["internal_wallet_name"] = candidate_name
+                return candidate_name
+
+            if candidate_name.startswith(prefix):
+                if candidate_name != stored_wallet_name:
+                    await update_browser_wallet_internal_name(expected_wallet_address, candidate_name)
+                    wallet_record["internal_wallet_name"] = candidate_name
+                return candidate_name
+
+    missing_name = stored_wallet_name or display_wallet_name or expected_wallet_address or "unknown"
+    raise HTTPException(
+        status_code=500,
+        detail=(
+            "Failed to locate the local UncCoin wallet file for this browser wallet. "
+            f"Tried: {', '.join(candidate_names) if candidate_names else missing_name}"
+        ),
+    )
+
+
 async def verify_wallet_record_identity(wallet_record: Dict[str, Any]) -> None:
-    local_wallet_address = await resolve_unccoin_wallet_address(wallet_record["internal_wallet_name"])
+    resolved_wallet_name = await reconcile_browser_wallet_internal_name(wallet_record)
+    local_wallet_address = await resolve_unccoin_wallet_address(resolved_wallet_name)
     expected_wallet_address = wallet_record["wallet_address"]
 
     if local_wallet_address != expected_wallet_address:
@@ -684,7 +809,7 @@ async def verify_wallet_record_identity(wallet_record: Dict[str, Any]) -> None:
             detail=(
                 "Local wallet mapping mismatch. "
                 f"Stored browser wallet address is {expected_wallet_address}, "
-                f"but local UncCoin wallet '{wallet_record['internal_wallet_name']}' resolves to {local_wallet_address}."
+                f"but local UncCoin wallet '{resolved_wallet_name}' resolves to {local_wallet_address}."
             ),
         )
 
@@ -946,7 +1071,7 @@ async def send_unccoin_transaction_with_bonus(
         await verify_wallet_record_identity(wallet_record)
         await seed_wallet_blockchain_state(wallet_record["wallet_address"])
         node_port = int(wallet_record["node_port"])
-        runner = InteractiveNodeRunner(wallet_record["internal_wallet_name"], node_port)
+        runner = InteractiveNodeRunner(str(wallet_record["internal_wallet_name"]).strip(), node_port)
 
         try:
             await runner.start()
