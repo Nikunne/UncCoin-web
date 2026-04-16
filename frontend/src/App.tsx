@@ -1604,6 +1604,18 @@ function BlockchainPage() {
         ].filter((address) => address.trim().length > 0),
     );
     const recentMiningWindow = blocks.slice(-RECENT_BLOCK_STATS_WINDOW);
+    const topMinerNames = Object.entries(
+        recentMiningWindow.reduce<Record<string, number>>((counts, block) => {
+            const minerName = block.description.trim();
+            if (!minerName) {
+                return counts;
+            }
+
+            counts[minerName] = (counts[minerName] ?? 0) + 1;
+            return counts;
+        }, {}),
+    ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, 3);
     const minedWalletAddresses = recentMiningWindow
         .map((block) =>
             block.transactions.find(
@@ -1621,7 +1633,6 @@ function BlockchainPage() {
             return counts;
         }, {}),
     ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
-    const topMiners = walletMinerDistribution.slice(0, 3);
     const addresses = Array.from(
         knownWalletAddresses,
     ).sort((left, right) => left.localeCompare(right));
@@ -1735,18 +1746,18 @@ function BlockchainPage() {
                 </div>
 
                 <div className="chain-stats blockchain-snapshot-grid">
-                    {topMiners.map(([address, count], index) => (
-                        <article key={address} className="chain-stat-card">
+                    {topMinerNames.map(([minerName, count], index) => (
+                        <article key={minerName} className="chain-stat-card">
                             <span className="chain-stat-label">Top Miner #{index + 1}</span>
-                            <strong className="chain-stat-mini blockchain-top-miner-name" title={getWalletDisplayName(address, blockchain)}>
-                                {getWalletDisplayName(address, blockchain)}
+                            <strong className="chain-stat-mini blockchain-top-miner-name" title={minerName}>
+                                {minerName}
                             </strong>
                             <span className="blockchain-top-miner-share">
                                 {count} blocks · {formatBlockShare(count, recentMiningWindow.length)}
                             </span>
                         </article>
                     ))}
-                    {topMiners.length === 0
+                    {topMinerNames.length === 0
                         ? Array.from({ length: 3 }, (_, index) => (
                               <article key={`empty-miner-${index}`} className="chain-stat-card">
                                   <span className="chain-stat-label">Top Miner #{index + 1}</span>
