@@ -1126,8 +1126,7 @@ function WalletDashboardPage() {
                         </button>
                     </div>
                     <p className="wallet-maintainer-note">
-                        Every sent transaction also pays {loadStoredBonusAmount()} UNC to the site maintainer. Press `h`
-                        to change the default amount.
+                        Every sent transaction also pays {loadStoredBonusAmount()} UNC to the site maintainer.
                     </p>
                     <form className="wallet-send-form" onSubmit={onSendSubmit}>
                         <label className="wallet-login-field">
