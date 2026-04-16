@@ -22,6 +22,7 @@ export type BlockchainBlock = {
 
 export type BlockchainResponse = {
     wallet_address: string;
+    wallet_names?: Record<string, string>;
     difficulty_bits: number;
     genesis_difficulty_bits: number;
     difficulty_growth_factor: number;

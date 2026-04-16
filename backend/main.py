@@ -40,6 +40,7 @@ SYNC_MAX_WAIT_SECONDS = int(os.getenv("UNC_SYNC_MAX_WAIT_SECONDS", "600"))
 BALANCE_POLL_INTERVAL_SECONDS = float(os.getenv("UNC_BALANCE_POLL_INTERVAL_SECONDS", "2"))
 BONUS_RECEIVER_ADDRESS = "c5c9f38923a71ff93e03317e5afc25e66c786aea8413caea2e48dcc4ae81c7bb"
 DEFAULT_BONUS_AMOUNT = "1"
+RECENT_WALLET_ACTIVITY_LIMIT = 40
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
@@ -188,7 +189,12 @@ def collect_wallet_addresses(chain_data: Dict[str, Any]) -> set[str]:
     return wallet_addresses
 
 
-def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str, Any]) -> Dict[str, Any]:
+def build_wallet_stats(
+    wallet_address: str,
+    balance: float,
+    chain_data: Dict[str, Any],
+    activity_limit: int | None = None,
+) -> Dict[str, Any]:
     blocks = chain_data.get("blocks", [])
     sent_count = 0
     received_count = 0
@@ -290,6 +296,9 @@ def build_wallet_stats(wallet_address: str, balance: float, chain_data: Dict[str
         latest_activity,
     )
 
+    if isinstance(activity_limit, int) and activity_limit >= 0:
+        activity = activity[:activity_limit]
+
     return {
         "wallet_address": wallet_address,
         "balance": balance,
@@ -311,7 +320,11 @@ async def get_wallet_balance(wallet_address: str) -> float | None:
         return balances.get(wallet_address)
 
 
-async def get_wallet_summary(wallet_address: str, require_chain_presence: bool = True) -> Dict[str, Any]:
+async def get_wallet_summary(
+    wallet_address: str,
+    require_chain_presence: bool = True,
+    activity_limit: int | None = None,
+) -> Dict[str, Any]:
     async with blockchain_lock:
         chain_data = dict(blockchain)
 
@@ -319,7 +332,7 @@ async def get_wallet_summary(wallet_address: str, require_chain_presence: bool =
         raise HTTPException(status_code=404, detail="Wallet address not found in blockchain data")
 
     balance = await get_wallet_balance(wallet_address)
-    return build_wallet_stats(wallet_address, balance or 0.0, chain_data)
+    return build_wallet_stats(wallet_address, balance or 0.0, chain_data, activity_limit=activity_limit)
 
 
 async def ensure_wallet_exists_on_chain(wallet_address: str) -> None:
@@ -1060,7 +1073,16 @@ async def get_balances() -> Dict[str, float]:
 @app.get("/blockchain")
 async def get_blockchain() -> Dict[str, Any]:
     async with blockchain_lock:
-        return dict(blockchain)
+        payload = dict(blockchain)
+
+    async with browser_wallets_lock:
+        payload["wallet_names"] = {
+            wallet_address: str(record.get("wallet_name", "")).strip()
+            for wallet_address, record in browser_wallets.items()
+            if isinstance(record, dict) and str(record.get("wallet_name", "")).strip()
+        }
+
+    return payload
 
 
 @app.post("/wallet-login")
@@ -1078,7 +1100,11 @@ async def wallet_login(payload: WalletLoginRequest) -> BrowserWalletSessionRespo
         raise HTTPException(status_code=401, detail="Invalid wallet name/address or password")
 
     token = await create_session_for_wallet(wallet_record)
-    summary = await get_wallet_summary(wallet_record["wallet_address"], require_chain_presence=False)
+    summary = await get_wallet_summary(
+        wallet_record["wallet_address"],
+        require_chain_presence=False,
+        activity_limit=RECENT_WALLET_ACTIVITY_LIMIT,
+    )
 
     return BrowserWalletSessionResponse(
         ok=True,
@@ -1098,7 +1124,11 @@ async def create_browser_wallet(payload: BrowserWalletCreateRequest) -> BrowserW
         internal_wallet_name=internal_wallet_name,
     )
     token = await create_session_for_wallet(wallet_record)
-    summary = await get_wallet_summary(wallet_address, require_chain_presence=False)
+    summary = await get_wallet_summary(
+        wallet_address,
+        require_chain_presence=False,
+        activity_limit=RECENT_WALLET_ACTIVITY_LIMIT,
+    )
 
     return BrowserWalletSessionResponse(
         ok=True,
@@ -1111,7 +1141,11 @@ async def create_browser_wallet(payload: BrowserWalletCreateRequest) -> BrowserW
 @app.get("/wallet-session")
 async def get_wallet_session(authorization: str | None = Header(default=None)) -> Dict[str, Any]:
     wallet_record = await require_authenticated_browser_wallet(authorization)
-    summary = await get_wallet_summary(wallet_record["wallet_address"], require_chain_presence=False)
+    summary = await get_wallet_summary(
+        wallet_record["wallet_address"],
+        require_chain_presence=False,
+        activity_limit=RECENT_WALLET_ACTIVITY_LIMIT,
+    )
     return {
         "ok": True,
         "browser_wallet": format_browser_wallet_record(wallet_record),
@@ -1141,7 +1175,11 @@ async def wallet_send(
         fee=payload.fee,
         bonus_amount=bonus_amount,
     )
-    wallet = await get_wallet_summary(wallet_record["wallet_address"], require_chain_presence=False)
+    wallet = await get_wallet_summary(
+        wallet_record["wallet_address"],
+        require_chain_presence=False,
+        activity_limit=RECENT_WALLET_ACTIVITY_LIMIT,
+    )
     return {
         "ok": True,
         "wallet": wallet,

@@ -556,7 +556,7 @@ body::-webkit-scrollbar-thumb {
 
 .chain-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -582,7 +582,7 @@ body::-webkit-scrollbar-thumb {
 .blockchain-distribution-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   padding-top: 10px;
   border-top: 1px dashed rgba(255, 220, 156, 0.18);
@@ -593,8 +593,21 @@ body::-webkit-scrollbar-thumb {
   border-top: 0;
 }
 
-.blockchain-distribution-address {
+.blockchain-distribution-copy {
+  min-width: 0;
   flex: 1;
+}
+
+.blockchain-distribution-address {
+  display: block;
+}
+
+.blockchain-distribution-subtitle {
+  display: block;
+  margin-top: 4px;
+  color: #cda976;
+  font-size: 0.72rem;
+  letter-spacing: 0.04rem;
 }
 
 .blockchain-distribution-share {
@@ -679,10 +692,30 @@ body::-webkit-scrollbar-thumb {
   font-size: 1.6rem;
 }
 
+.chain-stat-suffix {
+  color: #f0d4a0;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
 .chain-stat-mini {
   color: #fff0c9;
   font-size: 0.94rem;
   line-height: 1.35;
+}
+
+.blockchain-top-miner-name {
+  font-size: 1.05rem;
+  letter-spacing: 0.02rem;
+}
+
+.blockchain-top-miner-share {
+  display: block;
+  margin-top: 8px;
+  color: #f0d4a0;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08rem;
 }
 
 .featured-wallet-address {
@@ -981,14 +1014,10 @@ body::-webkit-scrollbar-thumb {
 }
 
 .transaction-row-compact {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 10px;
+  grid-template-columns: minmax(0, 1.8fr) auto minmax(140px, 0.9fr);
+  gap: 6px 12px;
   padding: 7px 9px;
-}
-
-.transaction-row-compact > :nth-child(1),
-.transaction-row-compact > :nth-child(2) {
-  grid-column: 1 / -1;
+  align-items: center;
 }
 
 .block-card-compact .block-card-header {
@@ -1012,6 +1041,27 @@ body::-webkit-scrollbar-thumb {
 .block-card-compact .transaction-time {
   font-size: 0.72rem;
   line-height: 1.35;
+}
+
+.transaction-route {
+  min-width: 0;
+}
+
+.transaction-route-values {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.transaction-route-values .hash-value {
+  min-width: 0;
+}
+
+.transaction-route-arrow {
+  flex-shrink: 0;
+  color: #cda976;
+  font-size: 0.8rem;
 }
 
 .block-card-compact .block-id {
@@ -1386,6 +1436,11 @@ body::-webkit-scrollbar-thumb {
 
   .transaction-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transaction-row-compact {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
   }
 }
 

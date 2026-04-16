@@ -25,13 +25,12 @@ const CHART_PADDING_TOP = 28;
 const CHART_PADDING_BOTTOM = 76;
 const CHART_TICK_COUNT = 5;
 const CHART_Y_TICK_COUNT = 5;
+const MAX_SUPPLY_CHART_POINTS = 180;
 const WALLET_SESSION_TOKEN_KEY = "unc-wallet-session-token";
 const WALLET_SESSION_META_KEY = "unc-wallet-session-meta";
 const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1";
 const SECONDARY_WALLET_ADDRESS = "fe269f427a5ad619ce480192db583a29a7ce4098b22111d9b7216e2fee6bc964";
 const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
-const HEI_FREDERIK_PATTERN = /heifrederik\d*/i;
-const WINDOWS_PATTERN = /windows/i;
 
 type StoredWalletSessionMeta = {
     wallet_address: string;
@@ -53,6 +52,14 @@ function truncateHash(hash: string): string {
     }
 
     return `${hash.slice(0, 10)}...${hash.slice(-10)}`;
+}
+
+function truncateMiddle(value: string, head = 8, tail = 6): string {
+    if (value.length <= head + tail + 3) {
+        return value;
+    }
+
+    return `${value.slice(0, head)}...${value.slice(-tail)}`;
 }
 
 function parseAmount(value: string): number {
@@ -211,6 +218,19 @@ function getWalletAddressClassName(baseClassName: string, address: string): stri
     return baseClassName;
 }
 
+function getWalletDisplayName(address: string, chainData: BlockchainResponse | null): string {
+    const walletName = chainData?.wallet_names?.[address]?.trim();
+    if (walletName) {
+        return walletName;
+    }
+
+    if (!address || address === "SYSTEM") {
+        return address || "Unknown";
+    }
+
+    return truncateMiddle(address);
+}
+
 function usePrevious<T>(value: T): T | undefined {
     const [previous, setPrevious] = useState<T>();
 
@@ -275,6 +295,36 @@ function buildSupplySeries(blocks: BlockchainBlock[]): SupplyPoint[] {
     }
 
     return series;
+}
+
+function downsampleSupplySeries(series: SupplyPoint[], maxPoints: number): SupplyPoint[] {
+    if (series.length <= maxPoints) {
+        return series;
+    }
+
+    const sampled: SupplyPoint[] = [];
+    const lastIndex = series.length - 1;
+
+    for (let index = 0; index < maxPoints; index += 1) {
+        const sourceIndex =
+            index === maxPoints - 1
+                ? lastIndex
+                : Math.round((index / (maxPoints - 1)) * lastIndex);
+        const point = series[sourceIndex];
+
+        if (!point) {
+            continue;
+        }
+
+        if (sampled[sampled.length - 1]?.timestampMs === point.timestampMs) {
+            sampled[sampled.length - 1] = point;
+            continue;
+        }
+
+        sampled.push(point);
+    }
+
+    return sampled;
 }
 
 function loadStoredWalletToken(): string {
@@ -1006,27 +1056,14 @@ function WalletDashboardPage() {
             try {
                 const session = await getWalletSession(walletToken);
                 const chainData = await getBlockchain();
-                let nextWallet = session.wallet;
                 const allKnownAddresses = collectKnownWalletAddresses(chainData);
                 const knownAddresses = allKnownAddresses.filter(
                     (address) => address !== session.wallet.wallet_address,
                 );
 
-                if (session.wallet.activity.length === 0 && session.wallet.transaction_count > 0) {
-                    const derivedActivity = buildWalletActivityFromBlockchain(session.wallet.wallet_address, chainData);
-
-                    if (derivedActivity.length > 0) {
-                        nextWallet = {
-                            ...session.wallet,
-                            activity: derivedActivity,
-                            latest_activity: session.wallet.latest_activity ?? derivedActivity[0]?.timestamp ?? null,
-                        };
-                    }
-                }
-
                 if (active) {
                     setBrowserWallet(session.browser_wallet);
-                    setWallet(nextWallet);
+                    setWallet(session.wallet);
                     setReceiverOptions(knownAddresses);
                     setKnownReceiverAddresses(allKnownAddresses);
                     setLastUpdated(new Date());
@@ -1415,9 +1452,10 @@ function StatPage() {
     }, []);
 
     const blocks = blockchain?.blocks ?? [];
-    const supplySeries = buildSupplySeries(blocks);
-    const latestPoint = supplySeries.length > 0 ? supplySeries[supplySeries.length - 1] : undefined;
-    const firstPoint = supplySeries[0];
+    const fullSupplySeries = buildSupplySeries(blocks);
+    const supplySeries = downsampleSupplySeries(fullSupplySeries, MAX_SUPPLY_CHART_POINTS);
+    const latestPoint = fullSupplySeries.length > 0 ? fullSupplySeries[fullSupplySeries.length - 1] : undefined;
+    const firstPoint = fullSupplySeries[0];
     const maxSupply = supplySeries.reduce((max, point) => Math.max(max, point.totalSupply), 0);
     const minTimestamp = supplySeries.reduce(
         (min, point) => Math.min(min, point.timestampMs),
@@ -1476,8 +1514,11 @@ function StatPage() {
                         <strong className="chain-stat-value">{latestPoint?.totalSupply ?? 0}</strong>
                     </article>
                     <article className="chain-stat-card">
-                        <span className="chain-stat-label">Data Points</span>
-                        <strong className="chain-stat-value">{supplySeries.length}</strong>
+                        <span className="chain-stat-label">Chart Points</span>
+                        <strong className="chain-stat-value">
+                            {supplySeries.length}
+                            <span className="chain-stat-suffix"> / {fullSupplySeries.length}</span>
+                        </strong>
                     </article>
                     <article className="chain-stat-card">
                         <span className="chain-stat-label">Start</span>
@@ -1597,6 +1638,7 @@ function StatPage() {
                             </div>
                             <p className="stat-chart-note">
                                 Supply is calculated as cumulative SYSTEM issuance minus transfers back to SYSTEM.
+                                The chart samples older history to keep loading fast.
                             </p>
                         </>
                     ) : (
@@ -1650,11 +1692,6 @@ function BlockchainPage() {
         ].filter((address) => address.trim().length > 0),
     );
     const recentMiningWindow = blocks.slice(-RECENT_BLOCK_STATS_WINDOW);
-    const smileMinedBlocks = recentMiningWindow.filter((block) => block.description.trim() === ":)");
-    const heiFrederikMinedBlocks = recentMiningWindow.filter((block) =>
-        HEI_FREDERIK_PATTERN.test(block.description),
-    );
-    const windowsMinedBlocks = recentMiningWindow.filter((block) => WINDOWS_PATTERN.test(block.description));
     const minedWalletAddresses = recentMiningWindow
         .map((block) =>
             block.transactions.find(
@@ -1672,6 +1709,7 @@ function BlockchainPage() {
             return counts;
         }, {}),
     ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+    const topMiners = walletMinerDistribution.slice(0, 3);
     const addresses = Array.from(
         knownWalletAddresses,
     ).sort((left, right) => left.localeCompare(right));
@@ -1686,7 +1724,7 @@ function BlockchainPage() {
     const sortedBlocks = [...filteredBlocks].reverse();
     const recentBlocks = sortedBlocks.slice(0, visibleBlocks);
     const latestBlock = filteredBlocks.length > 0 ? filteredBlocks[filteredBlocks.length - 1] : undefined;
-    const pendingTransactions = blockchain?.pending_transactions?.length ?? 0;
+    const filteredTransactionCount = filteredBlocks.reduce((count, block) => count + block.transactions.length, 0);
 
     useEffect(() => {
         setVisibleBlocks((current) => {
@@ -1781,22 +1819,29 @@ function BlockchainPage() {
             <section className="balances-shell blockchain-snapshot-shell" aria-label="Recent block mining stats">
                 <div className="balances-meta">
                     <span className="balances-section-title">Last {RECENT_BLOCK_STATS_WINDOW} Blocks</span>
-                    <p className="last-updated">Tracking mining descriptions in the latest sample.</p>
+                    <p className="last-updated">Tracking the most active miners in the latest sample.</p>
                 </div>
 
                 <div className="chain-stats blockchain-snapshot-grid">
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Mined With ":)"</span>
-                        <strong className="chain-stat-value">{formatBlockShare(smileMinedBlocks.length, recentMiningWindow.length)}</strong>
-                    </article>
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Mined With heiFrederik</span>
-                        <strong className="chain-stat-value">{formatBlockShare(heiFrederikMinedBlocks.length, recentMiningWindow.length)}</strong>
-                    </article>
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Mined With windows</span>
-                        <strong className="chain-stat-value">{formatBlockShare(windowsMinedBlocks.length, recentMiningWindow.length)}</strong>
-                    </article>
+                    {topMiners.map(([address, count], index) => (
+                        <article key={address} className="chain-stat-card">
+                            <span className="chain-stat-label">Top Miner #{index + 1}</span>
+                            <strong className="chain-stat-mini blockchain-top-miner-name" title={getWalletDisplayName(address, blockchain)}>
+                                {getWalletDisplayName(address, blockchain)}
+                            </strong>
+                            <span className="blockchain-top-miner-share">
+                                {count} blocks · {formatBlockShare(count, recentMiningWindow.length)}
+                            </span>
+                        </article>
+                    ))}
+                    {topMiners.length === 0
+                        ? Array.from({ length: 3 }, (_, index) => (
+                              <article key={`empty-miner-${index}`} className="chain-stat-card">
+                                  <span className="chain-stat-label">Top Miner #{index + 1}</span>
+                                  <strong className="chain-stat-mini">No miner data</strong>
+                              </article>
+                          ))
+                        : null}
                 </div>
 
                 <article className="chain-stat-card blockchain-distribution-card">
@@ -1805,15 +1850,20 @@ function BlockchainPage() {
                         <div className="blockchain-distribution-list">
                             {walletMinerDistribution.map(([address, count]) => (
                                 <div key={address} className="blockchain-distribution-row">
-                                    <code
-                                        className={getWalletAddressClassName(
-                                            "hash-value blockchain-distribution-address",
-                                            address,
-                                        )}
-                                        title={address}
-                                    >
-                                        {address}
-                                    </code>
+                                    <div className="blockchain-distribution-copy">
+                                        <code
+                                            className={getWalletAddressClassName(
+                                                "hash-value blockchain-distribution-address",
+                                                address,
+                                            )}
+                                            title={address}
+                                        >
+                                            {getWalletDisplayName(address, blockchain)}
+                                        </code>
+                                        <span className="blockchain-distribution-subtitle">
+                                            {truncateMiddle(address, 12, 10)}
+                                        </span>
+                                    </div>
                                     <span className="blockchain-distribution-share">
                                         {formatBlockShare(count, minedWalletAddresses.length)}
                                     </span>
@@ -1877,12 +1927,8 @@ function BlockchainPage() {
                         <strong className="chain-stat-value">{latestBlock?.block_id ?? "-"}</strong>
                     </article>
                     <article className="chain-stat-card">
-                        <span className="chain-stat-label">Difficulty Bits</span>
-                        <strong className="chain-stat-value">{blockchain?.difficulty_bits ?? "-"}</strong>
-                    </article>
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Pending Tx</span>
-                        <strong className="chain-stat-value">{pendingTransactions}</strong>
+                        <span className="chain-stat-label">Transactions</span>
+                        <strong className="chain-stat-value">{filteredTransactionCount}</strong>
                     </article>
                 </div>
 
@@ -1930,29 +1976,31 @@ function BlockchainPage() {
                                             key={`${block.block_id}-${transaction.timestamp}-${index}`}
                                             className="transaction-row transaction-row-compact"
                                         >
-                                            <div>
-                                                <span className="hash-label">From</span>
-                                                <code
-                                                    className={getWalletAddressClassName(
-                                                        "hash-value",
-                                                        transaction.sender,
-                                                    )}
-                                                    title={transaction.sender}
-                                                >
-                                                    {transaction.sender}
-                                                </code>
-                                            </div>
-                                            <div>
-                                                <span className="hash-label">To</span>
-                                                <code
-                                                    className={getWalletAddressClassName(
-                                                        "hash-value",
-                                                        transaction.receiver,
-                                                    )}
-                                                    title={transaction.receiver}
-                                                >
-                                                    {transaction.receiver}
-                                                </code>
+                                            <div className="transaction-route">
+                                                <span className="hash-label">Route</span>
+                                                <div className="transaction-route-values">
+                                                    <code
+                                                        className={getWalletAddressClassName(
+                                                            "hash-value",
+                                                            transaction.sender,
+                                                        )}
+                                                        title={transaction.sender}
+                                                    >
+                                                        {truncateMiddle(transaction.sender, 12, 10)}
+                                                    </code>
+                                                    <span className="transaction-route-arrow" aria-hidden="true">
+                                                        →
+                                                    </span>
+                                                    <code
+                                                        className={getWalletAddressClassName(
+                                                            "hash-value",
+                                                            transaction.receiver,
+                                                        )}
+                                                        title={transaction.receiver}
+                                                    >
+                                                        {truncateMiddle(transaction.receiver, 12, 10)}
+                                                    </code>
+                                                </div>
                                             </div>
                                             <div>
                                                 <span className="hash-label">Amount</span>
@@ -1964,7 +2012,7 @@ function BlockchainPage() {
                                                 </span>
                                             </div>
                                             <div>
-                                                <span className="hash-label">Timestamp</span>
+                                                <span className="hash-label">Time</span>
                                                 <span className="transaction-time">
                                                     {formatTimestamp(transaction.timestamp)}
                                                 </span>
