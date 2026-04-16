@@ -1704,6 +1704,18 @@ body::-webkit-scrollbar-thumb {
     grid-template-columns: 1fr;
   }
 
+  .stat-chart-card {
+    padding: 12px;
+  }
+
+  .stat-chart {
+    min-width: 620px;
+  }
+
+  .stat-label {
+    font-size: 10px;
+  }
+
   .blockchain-filter {
     grid-template-columns: 1fr;
     align-items: stretch;

@@ -29,6 +29,16 @@ const CHART_PADDING_BOTTOM = 76;
 const CHART_TICK_COUNT = 5;
 const CHART_Y_TICK_COUNT = 5;
 const MAX_SUPPLY_CHART_POINTS = 180;
+const MOBILE_BREAKPOINT_PX = 700;
+const MOBILE_CHART_WIDTH = 640;
+const MOBILE_CHART_HEIGHT = 280;
+const MOBILE_CHART_PADDING_LEFT = 56;
+const MOBILE_CHART_PADDING_RIGHT = 20;
+const MOBILE_CHART_PADDING_TOP = 20;
+const MOBILE_CHART_PADDING_BOTTOM = 58;
+const MOBILE_CHART_TICK_COUNT = 3;
+const MOBILE_CHART_Y_TICK_COUNT = 4;
+const MOBILE_MAX_SUPPLY_CHART_POINTS = 60;
 const WALLET_SESSION_TOKEN_KEY = "unc-wallet-session-token";
 const WALLET_SESSION_META_KEY = "unc-wallet-session-meta";
 const BONUS_AMOUNT_STORAGE_KEY = "unc-bonus-amount";
@@ -563,37 +573,42 @@ function SplitFlapTotal({ value }: SplitFlapTotalProps) {
     );
 }
 
-function buildYAxisTicks(maxSupply: number): YAxisTick[] {
-    return Array.from({ length: CHART_Y_TICK_COUNT }, (_, index) => {
-        const ratio = index / (CHART_Y_TICK_COUNT - 1);
+function buildYAxisTicksForChart(maxSupply: number, chartHeight: number, paddingTop: number, paddingBottom: number, tickCount: number): YAxisTick[] {
+    return Array.from({ length: tickCount }, (_, index) => {
+        const ratio = tickCount === 1 ? 0 : index / (tickCount - 1);
         const value = Math.round((1 - ratio) * maxSupply);
-        const y = CHART_PADDING_TOP + ratio * (CHART_HEIGHT - CHART_PADDING_TOP - CHART_PADDING_BOTTOM);
+        const y = paddingTop + ratio * (chartHeight - paddingTop - paddingBottom);
 
         return { value, y };
     });
 }
 
-function buildXAxisTicks(minTimestamp: number, maxTimestamp: number): XAxisTick[] {
+function buildXAxisTicksForChart(
+    minTimestamp: number,
+    maxTimestamp: number,
+    chartWidth: number,
+    paddingLeft: number,
+    paddingRight: number,
+    tickCount: number,
+): XAxisTick[] {
     if (minTimestamp === maxTimestamp) {
         const parsed = new Date(minTimestamp);
 
         return [
             {
                 value: minTimestamp,
-                x: CHART_PADDING_LEFT,
+                x: paddingLeft,
                 dateLabel: parsed.toLocaleDateString([], { day: "2-digit", month: "2-digit" }),
                 timeLabel: parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             },
         ];
     }
 
-    return Array.from({ length: CHART_TICK_COUNT }, (_, index) => {
-        const ratio = index / (CHART_TICK_COUNT - 1);
+    return Array.from({ length: tickCount }, (_, index) => {
+        const ratio = tickCount === 1 ? 0 : index / (tickCount - 1);
         const value = minTimestamp + ratio * (maxTimestamp - minTimestamp);
         const parsed = new Date(value);
-        const x =
-            CHART_PADDING_LEFT +
-            ratio * (CHART_WIDTH - CHART_PADDING_LEFT - CHART_PADDING_RIGHT);
+        const x = paddingLeft + ratio * (chartWidth - paddingLeft - paddingRight);
 
         return {
             value,
@@ -1084,8 +1099,7 @@ function WalletDashboardPage() {
                 <p className="masthead-kicker">Wallet Dashboard</p>
                 <h1 className="balances-title">My UncCoin Wallet</h1>
                 <p className="masthead-subtitle">
-                    Browser-created wallets can send UncCoins by spinning up the local node on port 4040, syncing,
-                    broadcasting the transaction, and shutting it back down.
+                    Browser-creaed wallets can send money using this interface. Be aware that the transaction time is dependant on current mining efforts.
                 </p>
             </header>
 
@@ -1367,6 +1381,9 @@ function BonusDashboard({
 function StatPage() {
     const [blockchain, setBlockchain] = useState<BlockchainResponse | null>(null);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [isMobileChart, setIsMobileChart] = useState(() =>
+        typeof window !== "undefined" ? window.innerWidth <= MOBILE_BREAKPOINT_PX : false,
+    );
 
     useEffect(() => {
         let active = true;
@@ -1392,9 +1409,31 @@ function StatPage() {
         };
     }, []);
 
+    useEffect(() => {
+        const onResize = () => {
+            setIsMobileChart(window.innerWidth <= MOBILE_BREAKPOINT_PX);
+        };
+
+        onResize();
+        window.addEventListener("resize", onResize);
+
+        return () => {
+            window.removeEventListener("resize", onResize);
+        };
+    }, []);
+
     const blocks = blockchain?.blocks ?? [];
     const fullSupplySeries = buildSupplySeries(blocks);
-    const supplySeries = downsampleSupplySeries(fullSupplySeries, MAX_SUPPLY_CHART_POINTS);
+    const chartWidth = isMobileChart ? MOBILE_CHART_WIDTH : CHART_WIDTH;
+    const chartHeight = isMobileChart ? MOBILE_CHART_HEIGHT : CHART_HEIGHT;
+    const chartPaddingLeft = isMobileChart ? MOBILE_CHART_PADDING_LEFT : CHART_PADDING_LEFT;
+    const chartPaddingRight = isMobileChart ? MOBILE_CHART_PADDING_RIGHT : CHART_PADDING_RIGHT;
+    const chartPaddingTop = isMobileChart ? MOBILE_CHART_PADDING_TOP : CHART_PADDING_TOP;
+    const chartPaddingBottom = isMobileChart ? MOBILE_CHART_PADDING_BOTTOM : CHART_PADDING_BOTTOM;
+    const chartTickCount = isMobileChart ? MOBILE_CHART_TICK_COUNT : CHART_TICK_COUNT;
+    const chartYTickCount = isMobileChart ? MOBILE_CHART_Y_TICK_COUNT : CHART_Y_TICK_COUNT;
+    const maxChartPoints = isMobileChart ? MOBILE_MAX_SUPPLY_CHART_POINTS : MAX_SUPPLY_CHART_POINTS;
+    const supplySeries = downsampleSupplySeries(fullSupplySeries, maxChartPoints);
     const latestPoint = fullSupplySeries.length > 0 ? fullSupplySeries[fullSupplySeries.length - 1] : undefined;
     const firstPoint = fullSupplySeries[0];
     const maxSupply = supplySeries.reduce((max, point) => Math.max(max, point.totalSupply), 0);
@@ -1410,24 +1449,40 @@ function StatPage() {
     const points = supplySeries.map((point) => {
         const x =
             minTimestamp === maxTimestamp
-                ? CHART_PADDING_LEFT
-                : CHART_PADDING_LEFT +
+                ? chartPaddingLeft
+                : chartPaddingLeft +
                   ((point.timestampMs - minTimestamp) / (maxTimestamp - minTimestamp)) *
-                      (CHART_WIDTH - CHART_PADDING_LEFT - CHART_PADDING_RIGHT);
+                      (chartWidth - chartPaddingLeft - chartPaddingRight);
         const y =
             maxSupply === 0
-                ? CHART_HEIGHT - CHART_PADDING_BOTTOM
-                : CHART_HEIGHT -
-                  CHART_PADDING_BOTTOM -
-                  (point.totalSupply / maxSupply) * (CHART_HEIGHT - CHART_PADDING_TOP - CHART_PADDING_BOTTOM);
+                ? chartHeight - chartPaddingBottom
+                : chartHeight -
+                  chartPaddingBottom -
+                  (point.totalSupply / maxSupply) * (chartHeight - chartPaddingTop - chartPaddingBottom);
         return { ...point, x, y };
     });
 
     const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
-    const xAxisY = CHART_HEIGHT - CHART_PADDING_BOTTOM;
-    const yAxisX = CHART_PADDING_LEFT;
-    const xAxisTicks = points.length > 0 ? buildXAxisTicks(minTimestamp, maxTimestamp) : [];
-    const yAxisTicks = buildYAxisTicks(maxSupply);
+    const xAxisY = chartHeight - chartPaddingBottom;
+    const yAxisX = chartPaddingLeft;
+    const xAxisTicks =
+        points.length > 0
+            ? buildXAxisTicksForChart(
+                  minTimestamp,
+                  maxTimestamp,
+                  chartWidth,
+                  chartPaddingLeft,
+                  chartPaddingRight,
+                  chartTickCount,
+              )
+            : [];
+    const yAxisTicks = buildYAxisTicksForChart(
+        maxSupply,
+        chartHeight,
+        chartPaddingTop,
+        chartPaddingBottom,
+        chartYTickCount,
+    );
 
     return (
         <PageScaffold>
@@ -1477,24 +1532,24 @@ function StatPage() {
                             <div className="stat-chart-scroll">
                                 <svg
                                     className="stat-chart"
-                                    viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+                                    viewBox={`0 0 ${chartWidth} ${chartHeight}`}
                                     role="img"
                                     aria-label="Line chart of total UncCoins in existence over time"
                                 >
                                     <defs>
                                         <clipPath id="stat-chart-clip">
                                             <rect
-                                                x={CHART_PADDING_LEFT}
-                                                y={CHART_PADDING_TOP}
-                                                width={CHART_WIDTH - CHART_PADDING_LEFT - CHART_PADDING_RIGHT}
-                                                height={CHART_HEIGHT - CHART_PADDING_TOP - CHART_PADDING_BOTTOM}
+                                                x={chartPaddingLeft}
+                                                y={chartPaddingTop}
+                                                width={chartWidth - chartPaddingLeft - chartPaddingRight}
+                                                height={chartHeight - chartPaddingTop - chartPaddingBottom}
                                             />
                                         </clipPath>
                                     </defs>
                                     <line
                                         className="stat-axis"
                                         x1={yAxisX}
-                                        y1={CHART_PADDING_TOP}
+                                        y1={chartPaddingTop}
                                         x2={yAxisX}
                                         y2={xAxisY}
                                     />
@@ -1502,15 +1557,15 @@ function StatPage() {
                                         className="stat-axis"
                                         x1={yAxisX}
                                         y1={xAxisY}
-                                        x2={CHART_WIDTH - CHART_PADDING_RIGHT}
+                                        x2={chartWidth - chartPaddingRight}
                                         y2={xAxisY}
                                     />
                                     <line
                                         className="stat-grid"
                                         x1={yAxisX}
-                                        y1={CHART_PADDING_TOP}
-                                        x2={CHART_WIDTH - CHART_PADDING_RIGHT}
-                                        y2={CHART_PADDING_TOP}
+                                        y1={chartPaddingTop}
+                                        x2={chartWidth - chartPaddingRight}
+                                        y2={chartPaddingTop}
                                     />
                                     {yAxisTicks.map((tick) => (
                                         <line
@@ -1518,7 +1573,7 @@ function StatPage() {
                                             className="stat-grid"
                                             x1={yAxisX}
                                             y1={tick.y}
-                                            x2={CHART_WIDTH - CHART_PADDING_RIGHT}
+                                            x2={chartWidth - chartPaddingRight}
                                             y2={tick.y}
                                         />
                                     ))}
@@ -1527,22 +1582,24 @@ function StatPage() {
                                             key={`grid-${tick.value}-${tick.x}`}
                                             className="stat-grid-vertical"
                                             x1={tick.x}
-                                            y1={CHART_PADDING_TOP}
+                                            y1={chartPaddingTop}
                                             x2={tick.x}
                                             y2={xAxisY}
                                         />
                                     ))}
                                     <g clipPath="url(#stat-chart-clip)">
                                         <polyline className="stat-line" points={polylinePoints} />
-                                        {points.map((point, index) => (
-                                            <circle
-                                                key={`point-${point.timestamp}-${point.x}`}
-                                                className="stat-point"
-                                                cx={point.x}
-                                                cy={point.y}
-                                                r={index === points.length - 1 ? "4" : "2.1"}
-                                            />
-                                        ))}
+                                        {points.map((point, index) =>
+                                            isMobileChart && index !== points.length - 1 ? null : (
+                                                <circle
+                                                    key={`point-${point.timestamp}-${point.x}`}
+                                                    className="stat-point"
+                                                    cx={point.x}
+                                                    cy={point.y}
+                                                    r={index === points.length - 1 ? "4" : "2.1"}
+                                                />
+                                            ),
+                                        )}
                                     </g>
                                     {yAxisTicks.map((tick) => (
                                         <text
@@ -1565,21 +1622,23 @@ function StatPage() {
                                                       : "stat-label-middle"
                                             }`}
                                             x={tick.x}
-                                            y={CHART_HEIGHT - 32}
+                                            y={chartHeight - (isMobileChart ? 26 : 32)}
                                         >
                                             <tspan x={tick.x} dy="0">
                                                 {tick.dateLabel}
                                             </tspan>
-                                            <tspan x={tick.x} dy="14">
-                                                {tick.timeLabel}
-                                            </tspan>
+                                            {isMobileChart ? null : (
+                                                <tspan x={tick.x} dy="14">
+                                                    {tick.timeLabel}
+                                                </tspan>
+                                            )}
                                         </text>
                                     ))}
                                 </svg>
                             </div>
                             <p className="stat-chart-note">
                                 Supply is calculated as cumulative SYSTEM issuance minus transfers back to SYSTEM.
-                                The chart samples older history to keep loading fast.
+                                The chart samples older history to keep loading fast{isMobileChart ? " on mobile." : "."}
                             </p>
                         </>
                     ) : (
