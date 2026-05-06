@@ -1312,6 +1312,28 @@ async def add_peer_command(runner: InteractiveNodeRunner, peer_address: str) -> 
         raise HTTPException(status_code=400, detail=f"Peer connection failed: {detail}")
 
 
+async def connect_to_any_configured_peer(runner: InteractiveNodeRunner) -> None:
+    if not DEFAULT_PEER_ADDRESSES:
+        return
+
+    failures: list[str] = []
+
+    for peer_address in DEFAULT_PEER_ADDRESSES:
+        try:
+            await add_peer_command(runner, peer_address)
+            return
+        except HTTPException as error:
+            failures.append(f"{peer_address}: {error.detail}")
+
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "Failed to connect to any configured UncCoin peer. "
+            f"Tried: {'; '.join(failures)}"
+        ),
+    )
+
+
 async def send_unccoin_transaction_with_bonus(
     wallet_record: Dict[str, Any],
     receiver_address: str,
@@ -1339,8 +1361,7 @@ async def send_unccoin_transaction_with_bonus(
         try:
             await runner.start()
             await runner.wait_until_ready()
-            for peer_address in DEFAULT_PEER_ADDRESSES:
-                await add_peer_command(runner, peer_address)
+            await connect_to_any_configured_peer(runner)
             await runner.send_command("sync")
             await runner.wait_for_sync_settle(timeout_seconds=15)
             await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
