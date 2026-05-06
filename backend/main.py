@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 
@@ -82,6 +83,11 @@ BETTING_SHARK_ADDRESS = os.getenv("UNC_BETTING_SHARK_ADDRESS", "").strip()
 API_SWEEP_ENABLED = os.getenv("UNC_API_SWEEP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 API_SWEEP_INTERVAL_SECONDS = int(os.getenv("UNC_API_SWEEP_INTERVAL_SECONDS", "60"))
 API_SWEEP_FEE = os.getenv("UNC_API_SWEEP_FEE", "0").strip()
+CORS_ALLOWED_ORIGINS = tuple(
+    origin.strip()
+    for origin in os.getenv("UNC_CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+)
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
@@ -1475,6 +1481,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Wallet Balances API", lifespan=lifespan)
+
+if CORS_ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(CORS_ALLOWED_ORIGINS),
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+    )
 
 
 @app.get("/balances")

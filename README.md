@@ -26,11 +26,14 @@ UNC_API_SWEEP_ENABLED=true
 UNC_API_SWEEP_INTERVAL_SECONDS=60
 UNC_API_SWEEP_FEE=0
 UNC_PEER_ADDRESSES=100.76.78.49:4040,100.71.105.5:4000
+UNC_CORS_ALLOWED_ORIGINS=https://other-app.example
 ```
 
 `UNC_WEB_API_TOKEN` is the shared secret used by the other site's server. Never expose it in browser code.
 
 `UNC_BETTING_SHARK_ADDRESS` is the house wallet address that API-created deposit wallets sweep their UncCoins into.
+
+`UNC_CORS_ALLOWED_ORIGINS` is only needed if a browser on another origin calls `https://unccoin.no/api/...` directly. Prefer server-to-server calls for endpoints that require `UNC_WEB_API_TOKEN`; otherwise the token has to be shipped to the browser.
 
 Create the house wallet once, then put its address in `UNC_BETTING_SHARK_ADDRESS`. You can create it with the browser wallet UI, the UncCoin CLI, or temporarily with `POST /api/wallets` before setting the env value. Once `UNC_BETTING_SHARK_ADDRESS` is set, external withdrawal calls are only allowed from that address.
 
