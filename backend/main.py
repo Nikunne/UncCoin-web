@@ -17,6 +17,34 @@ from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
 WEB_ROOT = BASE_DIR.parent
+ENV_FILE = BASE_DIR / ".env"
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        print(f"Error reading {path}: {error}")
+        return
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+
+        if key:
+            os.environ.setdefault(key, value)
+
+
+load_env_file(ENV_FILE)
+
 UNCCOIN_REPO = (WEB_ROOT.parent / "UncCoin").resolve()
 UNCCOIN_RUN_SCRIPT = UNCCOIN_REPO / "scripts" / "run.sh"
 UNCCOIN_BLOCKCHAINS_DIR = UNCCOIN_REPO / "state" / "blockchains"
@@ -31,7 +59,14 @@ NODE_PORT_END = int(os.getenv("UNC_NODE_PORT_END", "8500"))
 NODE_READY_TIMEOUT_SECONDS = int(os.getenv("UNC_NODE_READY_TIMEOUT_SECONDS", "45"))
 SYNC_WAIT_SECONDS = int(os.getenv("UNC_SYNC_WAIT_SECONDS", "15"))
 TX_WAIT_SECONDS = int(os.getenv("UNC_TX_WAIT_SECONDS", "5"))
-DEFAULT_PEER_ADDRESS = os.getenv("UNC_PEER_ADDRESS", "0.0.0.0:4040").strip()
+DEFAULT_PEER_ADDRESSES = tuple(
+    peer_address.strip()
+    for peer_address in os.getenv(
+        "UNC_PEER_ADDRESSES",
+        os.getenv("UNC_PEER_ADDRESS", "100.76.78.49:4040,100.71.105.5:4000"),
+    ).split(",")
+    if peer_address.strip()
+)
 OUTPUT_BALANCES_PATH = "../UncCoin-web/backend/penger.txt"
 OUTPUT_BLOCKCHAIN_PATH = "../UncCoin-web/backend/blockchain.json"
 PASSWORD_ITERATIONS = 240_000
@@ -42,6 +77,11 @@ BALANCE_POLL_INTERVAL_SECONDS = float(os.getenv("UNC_BALANCE_POLL_INTERVAL_SECON
 BONUS_RECEIVER_ADDRESS = "c5c9f38923a71ff93e03317e5afc25e66c786aea8413caea2e48dcc4ae81c7bb"
 DEFAULT_BONUS_AMOUNT = "1"
 RECENT_WALLET_ACTIVITY_LIMIT = 40
+EXTERNAL_API_TOKEN = os.getenv("UNC_WEB_API_TOKEN", "").strip()
+BETTING_SHARK_ADDRESS = os.getenv("UNC_BETTING_SHARK_ADDRESS", "").strip()
+API_SWEEP_ENABLED = os.getenv("UNC_API_SWEEP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+API_SWEEP_INTERVAL_SECONDS = int(os.getenv("UNC_API_SWEEP_INTERVAL_SECONDS", "60"))
+API_SWEEP_FEE = os.getenv("UNC_API_SWEEP_FEE", "0").strip()
 
 balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
@@ -53,6 +93,7 @@ wallet_sessions: Dict[str, Dict[str, str]] = {}
 wallet_sessions_lock = asyncio.Lock()
 node_command_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
+api_sweep_task: asyncio.Task | None = None
 WALLET_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
 app_settings: Dict[str, str] = {"bonus_amount": DEFAULT_BONUS_AMOUNT}
 app_settings_lock = asyncio.Lock()
@@ -74,6 +115,18 @@ class BrowserWalletSendRequest(BaseModel):
     fee: str = "0"
 
 
+class ApiWalletCreateRequest(BaseModel):
+    wallet_name: str = Field(min_length=3, max_length=64)
+    external_user_id: str | None = Field(default=None, max_length=200)
+
+
+class ApiTransactionRequest(BaseModel):
+    sender_address: str
+    receiver_address: str
+    amount: str
+    fee: str = "0"
+
+
 class BonusAmountUpdateRequest(BaseModel):
     bonus_amount: str
 
@@ -82,6 +135,16 @@ class BrowserWalletRecord(BaseModel):
     wallet_address: str
     wallet_name: str
     created_at: str
+
+
+class ApiDepositRecord(BaseModel):
+    from_address: str
+    amount: float
+    fee: float
+    block_id: int | None
+    timestamp: str | None
+    nonce: int | None
+    transaction_key: str
 
 
 class BrowserWalletSessionResponse(BaseModel):
@@ -333,6 +396,57 @@ def build_wallet_stats(
     }
 
 
+def build_incoming_deposits(wallet_address: str, chain_data: Dict[str, Any]) -> list[Dict[str, Any]]:
+    deposits: list[Dict[str, Any]] = []
+
+    for block in chain_data.get("blocks", []):
+        if not isinstance(block, dict):
+            continue
+
+        block_id = block.get("block_id")
+        for transaction_index, transaction in enumerate(block.get("transactions", [])):
+            if not isinstance(transaction, dict):
+                continue
+
+            sender = str(transaction.get("sender", "")).strip()
+            receiver = str(transaction.get("receiver", "")).strip()
+            if receiver != wallet_address or sender == "SYSTEM":
+                continue
+
+            timestamp = transaction.get("timestamp")
+            nonce = transaction.get("nonce")
+            transaction_key = ":".join(
+                [
+                    str(block_id),
+                    str(transaction_index),
+                    sender,
+                    receiver,
+                    str(transaction.get("amount", "")),
+                    str(nonce),
+                ]
+            )
+            deposits.append(
+                ApiDepositRecord(
+                    from_address=sender,
+                    amount=parse_amount(transaction.get("amount")),
+                    fee=parse_amount(transaction.get("fee")),
+                    block_id=block_id if isinstance(block_id, int) else None,
+                    timestamp=timestamp if isinstance(timestamp, str) else None,
+                    nonce=nonce if isinstance(nonce, int) else None,
+                    transaction_key=transaction_key,
+                ).model_dump()
+            )
+
+    deposits.sort(
+        key=lambda entry: (
+            parse_timestamp(entry.get("timestamp")) or float("-inf"),
+            entry.get("block_id") if isinstance(entry.get("block_id"), int) else -1,
+        ),
+        reverse=True,
+    )
+    return deposits
+
+
 async def get_wallet_balance(wallet_address: str) -> float | None:
     async with balances_lock:
         return balances.get(wallet_address)
@@ -379,6 +493,64 @@ def parse_decimal_amount(value: str, field_name: str) -> Decimal:
         raise HTTPException(status_code=400, detail=f"{field_name} must be zero or greater")
 
     return parsed
+
+
+def transaction_total(transaction: Dict[str, Any]) -> Decimal:
+    try:
+        amount = Decimal(str(transaction.get("amount", "0")).strip())
+        fee = Decimal(str(transaction.get("fee", "0")).strip())
+    except (InvalidOperation, AttributeError):
+        return Decimal("0")
+
+    return amount + fee
+
+
+def get_pending_outgoing_total(chain_data: Dict[str, Any], wallet_address: str) -> Decimal:
+    pending_total = Decimal("0")
+    pending_transactions = chain_data.get("pending_transactions", [])
+
+    if not isinstance(pending_transactions, list):
+        return pending_total
+
+    for transaction in pending_transactions:
+        if not isinstance(transaction, dict):
+            continue
+
+        if transaction.get("sender") == wallet_address:
+            pending_total += transaction_total(transaction)
+
+    return pending_total
+
+
+async def get_available_wallet_balance(wallet_address: str) -> Decimal:
+    balance = await get_wallet_balance(wallet_address)
+
+    async with blockchain_lock:
+        chain_data = dict(blockchain)
+
+    confirmed_balance = Decimal(str(balance if balance is not None else 0))
+    pending_outgoing = get_pending_outgoing_total(chain_data, wallet_address)
+    available_balance = confirmed_balance - pending_outgoing
+    return max(available_balance, Decimal("0"))
+
+
+async def require_available_wallet_balance(wallet_address: str, required_total: Decimal) -> None:
+    available_balance = await get_available_wallet_balance(wallet_address)
+
+    if available_balance < required_total:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "insufficient_available_balance",
+                "message": (
+                    "Insufficient available balance. "
+                    f"Needed {required_total}, available {available_balance}. "
+                    "Pending outgoing transactions are reserved until they are mined or rejected."
+                ),
+                "needed": str(required_total),
+                "available": str(available_balance),
+            },
+        )
 
 
 def parse_penger_file(text: str) -> Dict[str, float]:
@@ -506,18 +678,82 @@ async def refresh_loop() -> None:
         await asyncio.sleep(REFRESH_SECONDS)
 
 
-async def register_browser_wallet(wallet_address: str, wallet_name: str, password: str, internal_wallet_name: str) -> Dict[str, Any]:
+async def sweep_api_deposit_wallets_once() -> None:
+    if not API_SWEEP_ENABLED or not BETTING_SHARK_ADDRESS:
+        return
+
+    await sync_local_exports()
+    sweep_fee = parse_decimal_amount(API_SWEEP_FEE, "API sweep fee")
+
+    async with browser_wallets_lock:
+        deposit_wallets = [
+            dict(record)
+            for record in browser_wallets.values()
+            if isinstance(record, dict)
+            and record.get("wallet_kind") == "api_deposit"
+            and str(record.get("wallet_address", "")).strip()
+            and str(record.get("wallet_address", "")).strip() != BETTING_SHARK_ADDRESS
+        ]
+
+    for wallet_record in deposit_wallets:
+        wallet_address = str(wallet_record.get("wallet_address", "")).strip()
+        target_address = str(wallet_record.get("sweep_to_address") or BETTING_SHARK_ADDRESS).strip()
+        if not wallet_address or not target_address or wallet_address == target_address:
+            continue
+
+        available_balance = await get_available_wallet_balance(wallet_address)
+        amount_to_sweep = available_balance - sweep_fee
+        if amount_to_sweep <= 0:
+            continue
+
+        try:
+            await send_unccoin_transaction_with_bonus(
+                wallet_record=wallet_record,
+                receiver_address=target_address,
+                amount=str(amount_to_sweep),
+                fee=str(sweep_fee),
+                bonus_amount="0",
+            )
+        except HTTPException as error:
+            print(f"API deposit sweep failed for {wallet_address}: {error.detail}")
+        except Exception as error:
+            print(f"API deposit sweep failed for {wallet_address}: {error}")
+
+
+async def api_sweep_loop() -> None:
+    while True:
+        try:
+            await sweep_api_deposit_wallets_once()
+        except Exception as error:
+            print(f"API deposit sweep loop failed: {error}")
+        await asyncio.sleep(API_SWEEP_INTERVAL_SECONDS)
+
+
+async def register_browser_wallet(
+    wallet_address: str,
+    wallet_name: str,
+    password: str,
+    internal_wallet_name: str,
+    wallet_kind: str = "browser",
+    external_user_id: str | None = None,
+    sweep_to_address: str | None = None,
+) -> Dict[str, Any]:
     salt_hex, password_hash = hash_password(password)
     node_port = await allocate_node_port()
     record = {
         "wallet_address": wallet_address,
         "wallet_name": wallet_name,
         "internal_wallet_name": internal_wallet_name,
+        "wallet_kind": wallet_kind,
         "node_port": node_port,
         "created_at": now_iso(),
         "password_salt": salt_hex,
         "password_hash": password_hash,
     }
+    if external_user_id:
+        record["external_user_id"] = external_user_id
+    if sweep_to_address:
+        record["sweep_to_address"] = sweep_to_address
 
     async with browser_wallets_lock:
         browser_wallets[wallet_address] = record
@@ -626,6 +862,29 @@ async def require_authenticated_browser_wallet(authorization: str | None) -> Dic
         raise HTTPException(status_code=401, detail="Wallet session is no longer valid")
 
     return wallet_record
+
+
+def require_external_api_auth(
+    authorization: str | None = None,
+    x_api_key: str | None = None,
+) -> None:
+    if not EXTERNAL_API_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="External API auth is not configured. Set UNC_WEB_API_TOKEN on the backend service.",
+        )
+
+    candidate = ""
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer":
+            candidate = value.strip()
+
+    if not candidate and x_api_key:
+        candidate = x_api_key.strip()
+
+    if not candidate or not secrets.compare_digest(candidate, EXTERNAL_API_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid API token")
 
 
 def format_browser_wallet_record(record: Dict[str, Any]) -> Dict[str, Any]:
@@ -841,12 +1100,13 @@ class InteractiveNodeRunner:
         success_markers: list[str],
         failure_markers: list[str] | None = None,
         timeout_seconds: int = 15,
+        start_index: int = 0,
     ) -> str:
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         failure_markers = failure_markers or []
 
         while True:
-            output = self.tail_output()
+            output = "\n".join(list(self.output_lines)[start_index:]).strip()
 
             for marker in failure_markers:
                 if marker in output:
@@ -972,6 +1232,11 @@ class InteractiveNodeRunner:
         await self.process.stdin.drain()
         self.output_lines.append(f"> {command}")
 
+    async def send_command_with_marker(self, command: str) -> int:
+        start_index = len(self.output_lines)
+        await self.send_command(command)
+        return start_index
+
     async def sleep(self, seconds: int) -> None:
         await asyncio.sleep(seconds)
 
@@ -1016,11 +1281,12 @@ async def broadcast_tx_command(
     amount: str,
     fee: str,
 ) -> None:
-    await runner.send_command(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
+    start_index = await runner.send_command_with_marker(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
     tx_result = await runner.wait_for_output(
         success_markers=["Broadcast transaction "],
         failure_markers=["Invalid tx command:", "Rejected local transaction "],
         timeout_seconds=max(TX_WAIT_SECONDS, 15),
+        start_index=start_index,
     )
     if tx_result == "Invalid tx command:":
         output = runner.tail_output()
@@ -1030,6 +1296,20 @@ async def broadcast_tx_command(
         output = runner.tail_output()
         detail = output.rsplit("Rejected local transaction ", maxsplit=1)[-1].strip()
         raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
+
+
+async def add_peer_command(runner: InteractiveNodeRunner, peer_address: str) -> None:
+    start_index = await runner.send_command_with_marker(f"add-peer {peer_address}")
+    add_peer_result = await runner.wait_for_output(
+        success_markers=[f"Connected to peer {peer_address}"],
+        failure_markers=["Invalid add-peer command:"],
+        timeout_seconds=10,
+        start_index=start_index,
+    )
+    if add_peer_result == "Invalid add-peer command:":
+        output = runner.tail_output()
+        detail = output.rsplit("Invalid add-peer command:", maxsplit=1)[-1].strip()
+        raise HTTPException(status_code=400, detail=f"Peer connection failed: {detail}")
 
 
 async def send_unccoin_transaction_with_bonus(
@@ -1046,28 +1326,27 @@ async def send_unccoin_transaction_with_bonus(
     primary_fee = parse_decimal_amount(fee, "Fee")
     bonus_decimal = parse_decimal_amount(bonus_amount, "Bonus amount")
     required_total = primary_amount + primary_fee + bonus_decimal
+    wallet_address = str(wallet_record["wallet_address"]).strip()
 
     async with node_command_lock:
+        await sync_local_exports()
+        await require_available_wallet_balance(wallet_address, required_total)
         await verify_wallet_record_identity(wallet_record)
-        await seed_wallet_blockchain_state(wallet_record["wallet_address"])
+        await seed_wallet_blockchain_state(wallet_address)
         node_port = int(wallet_record["node_port"])
         runner = InteractiveNodeRunner(str(wallet_record["internal_wallet_name"]).strip(), node_port)
 
         try:
             await runner.start()
             await runner.wait_until_ready()
-            if DEFAULT_PEER_ADDRESS:
-                await runner.send_command(f"add-peer {DEFAULT_PEER_ADDRESS}")
-                add_peer_result = await runner.wait_for_output(
-                    success_markers=[f"Connected to peer {DEFAULT_PEER_ADDRESS}"],
-                    failure_markers=["Invalid add-peer command:"],
-                    timeout_seconds=10,
-                )
-                if add_peer_result == "Invalid add-peer command:":
-                    output = runner.tail_output()
-                    detail = output.rsplit("Invalid add-peer command:", maxsplit=1)[-1].strip()
-                    raise HTTPException(status_code=400, detail=f"Peer connection failed: {detail}")
+            for peer_address in DEFAULT_PEER_ADDRESSES:
+                await add_peer_command(runner, peer_address)
             await runner.send_command("sync")
+            await runner.wait_for_sync_settle(timeout_seconds=15)
+            await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
+            await runner.sleep(1)
+            await load_blockchain_once()
+            await require_available_wallet_balance(wallet_address, required_total)
             sync_deadline = asyncio.get_running_loop().time() + max(SYNC_WAIT_SECONDS, SYNC_MAX_WAIT_SECONDS)
             while True:
                 current_balance = await runner.query_wallet_balance()
@@ -1108,7 +1387,7 @@ async def send_unccoin_transaction_with_bonus(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global refresh_task
+    global refresh_task, api_sweep_task
 
     async with browser_wallets_lock:
         browser_wallets.clear()
@@ -1154,6 +1433,8 @@ async def lifespan(app: FastAPI):
     await load_balances_once()
     await load_blockchain_once()
     refresh_task = asyncio.create_task(refresh_loop())
+    if API_SWEEP_ENABLED and BETTING_SHARK_ADDRESS:
+        api_sweep_task = asyncio.create_task(api_sweep_loop())
 
     try:
         yield
@@ -1162,6 +1443,12 @@ async def lifespan(app: FastAPI):
             refresh_task.cancel()
             try:
                 await refresh_task
+            except asyncio.CancelledError:
+                pass
+        if api_sweep_task:
+            api_sweep_task.cancel()
+            try:
+                await api_sweep_task
             except asyncio.CancelledError:
                 pass
 
@@ -1292,6 +1579,133 @@ async def wallet_send(
         "command_output": command_output,
         "bonus_amount": bonus_amount,
     }
+
+
+@app.post("/wallets")
+@app.post("/api/wallets")
+async def api_create_wallet(
+    payload: ApiWalletCreateRequest,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    require_external_api_auth(authorization, x_api_key)
+    internal_wallet_name, wallet_address = await create_unccoin_wallet(payload.wallet_name)
+    wallet_record = await register_browser_wallet(
+        wallet_address=wallet_address,
+        wallet_name=payload.wallet_name.strip(),
+        password=secrets.token_urlsafe(32),
+        internal_wallet_name=internal_wallet_name,
+        wallet_kind="api_deposit",
+        external_user_id=payload.external_user_id.strip() if payload.external_user_id else None,
+        sweep_to_address=BETTING_SHARK_ADDRESS or None,
+    )
+    summary = await get_wallet_summary(
+        wallet_address,
+        require_chain_presence=False,
+        activity_limit=RECENT_WALLET_ACTIVITY_LIMIT,
+    )
+    return {
+        "ok": True,
+        "wallet": format_browser_wallet_record(wallet_record),
+        "summary": summary,
+    }
+
+
+@app.post("/transactions")
+@app.post("/api/transactions")
+async def api_send_transaction(
+    payload: ApiTransactionRequest,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    require_external_api_auth(authorization, x_api_key)
+    sender_address = payload.sender_address.strip()
+    if not BETTING_SHARK_ADDRESS:
+        raise HTTPException(status_code=503, detail="UNC_BETTING_SHARK_ADDRESS is not configured")
+    if sender_address != BETTING_SHARK_ADDRESS:
+        raise HTTPException(status_code=403, detail="External withdrawals can only be sent from UNC_BETTING_SHARK_ADDRESS")
+
+    wallet_record = await get_browser_wallet(sender_address)
+    if not wallet_record:
+        raise HTTPException(status_code=404, detail="Sender wallet is not managed by this backend")
+
+    command_output = await send_unccoin_transaction_with_bonus(
+        wallet_record=wallet_record,
+        receiver_address=payload.receiver_address,
+        amount=payload.amount,
+        fee=payload.fee,
+        bonus_amount="0",
+    )
+    wallet = await get_wallet_summary(
+        sender_address,
+        require_chain_presence=False,
+        activity_limit=RECENT_WALLET_ACTIVITY_LIMIT,
+    )
+    return {
+        "ok": True,
+        "wallet": wallet,
+        "command_output": command_output,
+    }
+
+
+@app.get("/api/blockchain")
+async def api_get_blockchain(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    require_external_api_auth(authorization, x_api_key)
+    return await get_blockchain()
+
+
+@app.get("/api/balances")
+async def api_get_balances(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> Dict[str, float]:
+    require_external_api_auth(authorization, x_api_key)
+    return await get_balances()
+
+
+@app.get("/api/wallets/{wallet_address}")
+async def api_get_wallet(
+    wallet_address: str,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    require_external_api_auth(authorization, x_api_key)
+    return await get_wallet_summary(wallet_address)
+
+
+@app.get("/wallets/{wallet_address}/incoming")
+@app.get("/api/wallets/{wallet_address}/incoming")
+async def api_get_wallet_incoming(
+    wallet_address: str,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    require_external_api_auth(authorization, x_api_key)
+    async with blockchain_lock:
+        chain_data = dict(blockchain)
+
+    return {
+        "ok": True,
+        "wallet_address": wallet_address,
+        "incoming": build_incoming_deposits(wallet_address, chain_data),
+    }
+
+
+@app.post("/sweep")
+@app.post("/api/sweep")
+async def api_sweep_deposit_wallets(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    require_external_api_auth(authorization, x_api_key)
+    if not BETTING_SHARK_ADDRESS:
+        raise HTTPException(status_code=503, detail="UNC_BETTING_SHARK_ADDRESS is not configured")
+
+    await sweep_api_deposit_wallets_once()
+    return {"ok": True}
 
 
 @app.get("/bonus-amount")

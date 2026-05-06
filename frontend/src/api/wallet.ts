@@ -131,7 +131,7 @@ function normalizeBonusAmountSettings(value: unknown): BonusAmountSettings {
 
 async function parseError(response: Response): Promise<never> {
     const data = (await response.json().catch(() => null)) as
-        | { detail?: string | Array<{ loc?: unknown[]; msg?: string }> }
+        | { detail?: string | { message?: string } | Array<{ loc?: unknown[]; msg?: string }> }
         | null;
 
     if (Array.isArray(data?.detail)) {
@@ -144,6 +144,15 @@ async function parseError(response: Response): Promise<never> {
             .join(". ");
 
         throw new Error(message || `Request failed: ${response.status}`);
+    }
+
+    if (
+        data?.detail &&
+        typeof data.detail === "object" &&
+        !Array.isArray(data.detail) &&
+        typeof data.detail.message === "string"
+    ) {
+        throw new Error(data.detail.message);
     }
 
     throw new Error(typeof data?.detail === "string" ? data.detail : `Request failed: ${response.status}`);
