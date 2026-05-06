@@ -46,7 +46,7 @@ const DEFAULT_BONUS_AMOUNT = "1";
 const BONUS_RECEIVER_ADDRESS = "c5c9f38923a71ff93e03317e5afc25e66c786aea8413caea2e48dcc4ae81c7bb";
 const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1";
 const SECONDARY_WALLET_ADDRESS = "fe269f427a5ad619ce480192db583a29a7ce4098b22111d9b7216e2fee6bc964";
-const INVESTMENT_BANNER_TEXT = ["Early investor? Click here!"];
+const INVESTMENT_BANNER_TEXT = ["Feeling lucky? Click here!"];
 
 type StoredWalletSessionMeta = {
     wallet_address: string;
@@ -355,7 +355,7 @@ function TopInvestmentTicker() {
     return (
         <a
             className="breaking-investment-banner"
-            href="https://en.wikipedia.org/wiki/Exit_scam#Cryptocurrency_scams"
+            href="https://bigdick.fyi"
             target="_blank"
             rel="noreferrer"
         >
@@ -366,7 +366,7 @@ function TopInvestmentTicker() {
                     </span>
                 ))}
             </span>
-            <span className="sr-only">Early investor? Click here!</span>
+            <span className="sr-only">Feeling lucky? Click here!</span>
         </a>
     );
 }
