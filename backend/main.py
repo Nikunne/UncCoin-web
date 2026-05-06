@@ -528,6 +528,25 @@ def get_pending_outgoing_total(chain_data: Dict[str, Any], wallet_address: str) 
     return pending_total
 
 
+def extract_broadcast_transactions(command_output: str) -> list[Dict[str, str]]:
+    transactions: list[Dict[str, str]] = []
+
+    for line in command_output.splitlines():
+        match = re.search(r"Broadcast transaction ([0-9a-f]+) from (\S+) to (\S+)", line)
+        if not match:
+            continue
+
+        transactions.append(
+            {
+                "transaction_id_prefix": match.group(1),
+                "sender_address": match.group(2),
+                "receiver_address": match.group(3),
+            }
+        )
+
+    return transactions
+
+
 async def get_available_wallet_balance(wallet_address: str) -> Decimal:
     balance = await get_wallet_balance(wallet_address)
 
@@ -635,17 +654,32 @@ async def load_blockchain_once() -> None:
     if not BLOCKCHAIN_FILE.exists():
         return
 
-    try:
-        text = BLOCKCHAIN_FILE.read_text(encoding="utf-8")
-        parsed = json.loads(text)
-    except FileNotFoundError:
-        print(f"Error: {BLOCKCHAIN_FILE} not found.")
-        return
-    except json.JSONDecodeError as error:
-        print(f"Error parsing {BLOCKCHAIN_FILE}: {error}")
-        return
-    except Exception as error:
-        print(f"Error reading {BLOCKCHAIN_FILE}: {error}")
+    last_parse_error: json.JSONDecodeError | None = None
+    parsed: Any = None
+    for attempt in range(5):
+        try:
+            text = BLOCKCHAIN_FILE.read_text(encoding="utf-8")
+            parsed = json.loads(text)
+            last_parse_error = None
+            break
+        except FileNotFoundError:
+            print(f"Error: {BLOCKCHAIN_FILE} not found.")
+            return
+        except json.JSONDecodeError as error:
+            last_parse_error = error
+            if attempt < 4:
+                await asyncio.sleep(0.2)
+                continue
+        except Exception as error:
+            print(f"Error reading {BLOCKCHAIN_FILE}: {error}")
+            return
+
+    if last_parse_error is not None:
+        async with blockchain_lock:
+            has_previous_snapshot = bool(blockchain)
+
+        if not has_previous_snapshot:
+            print(f"Error parsing {BLOCKCHAIN_FILE}: {last_parse_error}")
         return
 
     if not isinstance(parsed, dict):
@@ -1671,6 +1705,7 @@ async def api_send_transaction(
         fee=payload.fee,
         bonus_amount="0",
     )
+    broadcasts = extract_broadcast_transactions(command_output)
     wallet = await get_wallet_summary(
         sender_address,
         require_chain_presence=False,
@@ -1678,6 +1713,16 @@ async def api_send_transaction(
     )
     return {
         "ok": True,
+        "status": "submitted",
+        "message": "Withdrawal transaction was broadcast. It is not final until mined into a block.",
+        "transaction": {
+            "sender_address": sender_address,
+            "receiver_address": payload.receiver_address.strip(),
+            "amount": payload.amount.strip(),
+            "fee": payload.fee.strip(),
+            "broadcast": broadcasts[0] if broadcasts else None,
+        },
+        "broadcasts": broadcasts,
         "wallet": wallet,
         "command_output": command_output,
     }

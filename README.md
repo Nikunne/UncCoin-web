@@ -132,6 +132,36 @@ curl -X POST https://your-domain/api/transactions \
 
 The backend rejects this call unless `sender_address` exactly matches `UNC_BETTING_SHARK_ADDRESS`. It also rejects sends when confirmed balance minus pending outgoing transactions is too low.
 
+A successful response means the transaction was accepted locally and broadcast to peers. It is not final until mined into a block.
+
+```json
+{
+  "ok": true,
+  "status": "submitted",
+  "message": "Withdrawal transaction was broadcast. It is not final until mined into a block.",
+  "transaction": {
+    "sender_address": "betting-shark-house-wallet-address",
+    "receiver_address": "user-withdrawal-wallet-address",
+    "amount": "250",
+    "fee": "0",
+    "broadcast": {
+      "transaction_id_prefix": "abc123def456",
+      "sender_address": "betting-shark-house-wallet-address",
+      "receiver_address": "user-withdrawal-wallet-address"
+    }
+  },
+  "broadcasts": [
+    {
+      "transaction_id_prefix": "abc123def456",
+      "sender_address": "betting-shark-house-wallet-address",
+      "receiver_address": "user-withdrawal-wallet-address"
+    }
+  ],
+  "wallet": {},
+  "command_output": "..."
+}
+```
+
 If the house wallet does not have enough available UncCoins, the API returns HTTP `409`:
 
 ```json
