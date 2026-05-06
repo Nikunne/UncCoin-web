@@ -66,11 +66,13 @@ body::-webkit-scrollbar-thumb {
   margin: 0 auto 18px;
   padding: 10px 14px;
   overflow: hidden;
-  border: 1px solid rgba(255, 223, 157, 0.38);
-  background: linear-gradient(90deg, rgba(121, 17, 8, 0.95), rgba(54, 17, 6, 0.98));
-  color: #fff1cc;
+  border: 1px solid rgba(156, 236, 221, 0.34);
+  background:
+    linear-gradient(90deg, rgba(26, 226, 232, 0.13), transparent 28%, rgba(255, 235, 39, 0.08) 52%, rgba(255, 80, 173, 0.12)),
+    linear-gradient(90deg, rgba(13, 38, 39, 0.98), rgba(25, 36, 28, 0.98) 48%, rgba(35, 23, 42, 0.98));
+  color: #fff4bf;
   text-decoration: none;
-  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 242, 182, 0.08);
   justify-content: flex-start;
 }
 
@@ -89,7 +91,7 @@ body::-webkit-scrollbar-thumb {
 .breaking-investment-item::after {
   content: "//";
   margin-left: 14px;
-  color: rgba(255, 230, 176, 0.58);
+  color: rgba(76, 224, 231, 0.68);
 }
 
 @keyframes investment-ticker {
