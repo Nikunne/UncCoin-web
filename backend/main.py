@@ -889,7 +889,7 @@ def require_external_api_auth(
     if not candidate and x_api_key:
         candidate = x_api_key.strip()
 
-    if not candidate or not secrets.compare_digest(candidate, EXTERNAL_API_TOKEN):
+    if not candidate or not secrets.compare_digest(candidate.encode("utf-8"), EXTERNAL_API_TOKEN.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid API token")
 
 
