@@ -3,6 +3,7 @@ import { Link, Route, Routes, useNavigate } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
 import { getBlockchain, type BlockchainBlock, type BlockchainResponse } from "./api/blockchain";
 import {
+    ApiError,
     createBrowserWallet,
     getBonusAmount,
     getWalletSession,
@@ -1036,8 +1037,10 @@ function WalletDashboardPage() {
                 if (active) {
                     const message = error instanceof Error ? error.message : "Failed to load wallet";
                     setErrorMessage(message);
-                    clearWalletSession();
-                    navigate("/login", { replace: true });
+                    if (error instanceof ApiError && error.status === 401) {
+                        clearWalletSession();
+                        navigate("/login", { replace: true });
+                    }
                 }
             }
         };

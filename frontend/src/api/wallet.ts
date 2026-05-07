@@ -129,6 +129,16 @@ function normalizeBonusAmountSettings(value: unknown): BonusAmountSettings {
     };
 }
 
+export class ApiError extends Error {
+    readonly status: number;
+
+    constructor(message: string, status: number) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+    }
+}
+
 async function parseError(response: Response): Promise<never> {
     const data = (await response.json().catch(() => null)) as
         | { detail?: string | { message?: string } | Array<{ loc?: unknown[]; msg?: string }> }
@@ -143,7 +153,7 @@ async function parseError(response: Response): Promise<never> {
             })
             .join(". ");
 
-        throw new Error(message || `Request failed: ${response.status}`);
+        throw new ApiError(message || `Request failed: ${response.status}`, response.status);
     }
 
     if (
@@ -152,10 +162,10 @@ async function parseError(response: Response): Promise<never> {
         !Array.isArray(data.detail) &&
         typeof data.detail.message === "string"
     ) {
-        throw new Error(data.detail.message);
+        throw new ApiError(data.detail.message, response.status);
     }
 
-    throw new Error(typeof data?.detail === "string" ? data.detail : `Request failed: ${response.status}`);
+    throw new ApiError(typeof data?.detail === "string" ? data.detail : `Request failed: ${response.status}`, response.status);
 }
 
 export async function loginWithWallet(walletIdentifier: string, password: string): Promise<WalletSession> {
