@@ -101,6 +101,7 @@ node_command_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
 api_sweep_task: asyncio.Task | None = None
 WALLET_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
+UNCCOIN_ADDRESS_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 app_settings: Dict[str, str] = {"bonus_amount": DEFAULT_BONUS_AMOUNT}
 app_settings_lock = asyncio.Lock()
 
@@ -111,7 +112,7 @@ class WalletLoginRequest(BaseModel):
 
 
 class BrowserWalletCreateRequest(BaseModel):
-    wallet_name: str = Field(min_length=3, max_length=64)
+    wallet_name: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9 _\-]*$")
     password: str = Field(min_length=6, max_length=200)
 
 
@@ -122,7 +123,7 @@ class BrowserWalletSendRequest(BaseModel):
 
 
 class ApiWalletCreateRequest(BaseModel):
-    wallet_name: str = Field(min_length=3, max_length=64)
+    wallet_name: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9 _\-]*$")
     external_user_id: str | None = Field(default=None, max_length=200)
 
 
@@ -492,13 +493,36 @@ async def set_bonus_amount_setting(bonus_amount: str) -> str:
 def parse_decimal_amount(value: str, field_name: str) -> Decimal:
     try:
         parsed = Decimal(value.strip())
+        if not parsed.is_finite():
+            raise InvalidOperation
+        if parsed < 0:
+            raise HTTPException(status_code=400, detail=f"{field_name} must be zero or greater")
+    except HTTPException:
+        raise
     except (AttributeError, InvalidOperation) as error:
         raise HTTPException(status_code=400, detail=f"{field_name} must be a valid decimal number") from error
 
-    if parsed < 0:
-        raise HTTPException(status_code=400, detail=f"{field_name} must be zero or greater")
-
     return parsed
+
+
+def validate_unccoin_address(address: str, field_name: str = "Receiver address") -> str:
+    normalized = address.strip()
+    if not UNCCOIN_ADDRESS_PATTERN.match(normalized):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} must be exactly 64 lowercase hexadecimal characters with no spaces",
+        )
+    return normalized
+
+
+def validate_node_command_param(value: str, field_name: str) -> str:
+    stripped = value.strip()
+    if "\n" in stripped or "\r" in stripped or " " in stripped or "\t" in stripped:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} contains invalid characters",
+        )
+    return stripped
 
 
 def transaction_total(transaction: Dict[str, Any]) -> Decimal:
@@ -1321,7 +1345,10 @@ async def broadcast_tx_command(
     amount: str,
     fee: str,
 ) -> None:
-    start_index = await runner.send_command_with_marker(f"tx {receiver_address.strip()} {amount.strip()} {fee.strip()}")
+    safe_address = validate_unccoin_address(receiver_address, "Receiver address")
+    safe_amount = validate_node_command_param(amount, "Amount")
+    safe_fee = validate_node_command_param(fee, "Fee")
+    start_index = await runner.send_command_with_marker(f"tx {safe_address} {safe_amount} {safe_fee}")
     tx_result = await runner.wait_for_output(
         success_markers=["Broadcast transaction "],
         failure_markers=["Invalid tx command:", "Rejected local transaction "],
@@ -1384,6 +1411,8 @@ async def send_unccoin_transaction_with_bonus(
     if not receiver_address.strip():
         raise HTTPException(status_code=400, detail="Receiver wallet address is required")
 
+    validate_unccoin_address(receiver_address, "Receiver address")
+
     primary_amount = parse_decimal_amount(amount, "Amount")
     primary_fee = parse_decimal_amount(fee, "Fee")
     bonus_decimal = parse_decimal_amount(bonus_amount, "Bonus amount")
@@ -1430,7 +1459,10 @@ async def send_unccoin_transaction_with_bonus(
 
             await broadcast_tx_command(runner, receiver_address, amount, fee)
             if bonus_decimal > 0:
-                await broadcast_tx_command(runner, BONUS_RECEIVER_ADDRESS, str(bonus_decimal), "0")
+                try:
+                    await broadcast_tx_command(runner, BONUS_RECEIVER_ADDRESS, str(bonus_decimal), "0")
+                except HTTPException as bonus_error:
+                    print(f"Bonus transaction failed after main tx succeeded (sender {wallet_address}): {bonus_error.detail}")
             await runner.send_command(f"txtbalances {OUTPUT_BALANCES_PATH}")
             await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
             await runner.sleep(2)
@@ -1702,7 +1734,7 @@ async def api_send_transaction(
         wallet_record=wallet_record,
         receiver_address=payload.receiver_address,
         amount=payload.amount,
-        fee=payload.fee,
+        fee="0",
         bonus_amount="0",
     )
     broadcasts = extract_broadcast_transactions(command_output)
@@ -1802,7 +1834,9 @@ async def update_bonus_amount(
     payload: BonusAmountUpdateRequest,
     authorization: str | None = Header(default=None),
 ) -> Dict[str, Any]:
-    await require_authenticated_browser_wallet(authorization)
+    wallet_record = await require_authenticated_browser_wallet(authorization)
+    if wallet_record.get("wallet_name", "").strip().casefold() != "niklas":
+        raise HTTPException(status_code=403, detail="Not authorized to update bonus amount")
     bonus_amount = await set_bonus_amount_setting(payload.bonus_amount)
     return {
         "ok": True,
