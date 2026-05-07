@@ -799,6 +799,56 @@ body::-webkit-scrollbar-thumb {
   font-weight: 700;
 }
 
+.bigdick-deposit-card {
+  position: relative;
+  margin-bottom: 18px;
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(156, 236, 221, 0.34);
+  background:
+    linear-gradient(90deg, rgba(26, 226, 232, 0.13), transparent 30%, rgba(255, 235, 39, 0.08) 54%, rgba(255, 80, 173, 0.12)),
+    linear-gradient(90deg, rgba(13, 38, 39, 0.98), rgba(25, 36, 28, 0.98) 48%, rgba(35, 23, 42, 0.98));
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 242, 182, 0.08);
+}
+
+.bigdick-deposit-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(156, 236, 221, 0.22);
+}
+
+.bigdick-deposit-kicker {
+  color: #4ce0e7;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.16rem;
+  text-transform: uppercase;
+}
+
+.bigdick-deposit-title {
+  color: #fff4bf;
+  font-size: 1rem;
+  letter-spacing: 0.12rem;
+  text-transform: uppercase;
+}
+
+.bigdick-deposit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bigdick-deposit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
 .wallet-stats-grid {
   margin-top: 12px;
 }

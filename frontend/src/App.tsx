@@ -42,6 +42,7 @@ const MOBILE_MAX_SUPPLY_CHART_POINTS = 60;
 const WALLET_SESSION_TOKEN_KEY = "unc-wallet-session-token";
 const WALLET_SESSION_META_KEY = "unc-wallet-session-meta";
 const BONUS_AMOUNT_STORAGE_KEY = "unc-bonus-amount";
+const BIGDICK_ADDRESS_STORAGE_KEY = "unc-bigdick-address";
 const DEFAULT_BONUS_AMOUNT = "1";
 const BONUS_RECEIVER_ADDRESS = "c5c9f38923a71ff93e03317e5afc25e66c786aea8413caea2e48dcc4ae81c7bb";
 const FEATURED_WALLET_ADDRESS = "2822fb2786ef939c5350a2bb84cb200f6779c9e9ed4652f7360fd243e2d95bd1";
@@ -254,6 +255,22 @@ function loadStoredWalletToken(): string {
     }
 
     return window.localStorage.getItem(WALLET_SESSION_TOKEN_KEY) ?? "";
+}
+
+function loadStoredBigdickAddress(): string {
+    if (typeof window === "undefined") {
+        return "";
+    }
+
+    return window.localStorage.getItem(BIGDICK_ADDRESS_STORAGE_KEY) ?? "";
+}
+
+function persistBigdickAddress(address: string): void {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    window.localStorage.setItem(BIGDICK_ADDRESS_STORAGE_KEY, address);
 }
 
 function loadStoredWalletMeta(): BrowserWallet | null {
@@ -974,6 +991,11 @@ function WalletDashboardPage() {
     const [sendFee, setSendFee] = useState("0");
     const [sendStatus, setSendStatus] = useState("");
     const [isSending, setIsSending] = useState(false);
+    const [bigdickAddress, setBigdickAddress] = useState(loadStoredBigdickAddress());
+    const [bigdickAddressDraft, setBigdickAddressDraft] = useState(loadStoredBigdickAddress());
+    const [bigdickAmount, setBigdickAmount] = useState("");
+    const [isBigdickAddressEditing, setIsBigdickAddressEditing] = useState(!loadStoredBigdickAddress());
+    const [isBigdickDepositing, setIsBigdickDepositing] = useState(false);
     const [receiverOptions, setReceiverOptions] = useState<string[]>([]);
 
     useEffect(() => {
@@ -1059,37 +1081,70 @@ function WalletDashboardPage() {
         navigate("/login");
     };
 
-    const onSendSubmit = async (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
+    const submitTransaction = async (
+        trimmedReceiverAddress: string,
+        amount: string,
+        fee: string,
+        onSuccess: () => void,
+        setBusy: (value: boolean) => void,
+    ) => {
         if (!walletToken) {
             return;
         }
 
-        setIsSending(true);
+        setBusy(true);
         setSendStatus("");
         setErrorMessage("");
 
-        const trimmedReceiverAddress = receiverAddress.trim();
         if (!trimmedReceiverAddress) {
             setErrorMessage("Receiver address is required");
-            setIsSending(false);
+            setBusy(false);
             return;
         }
 
         try {
-            const response = await sendWalletTransaction(walletToken, trimmedReceiverAddress, sendAmount, sendFee);
+            const response = await sendWalletTransaction(walletToken, trimmedReceiverAddress, amount, fee);
             setBrowserWallet(response.browser_wallet);
             setWallet(response.wallet);
             setLastUpdated(new Date());
             setSendStatus("Transaction submitted. The node was started, synced, broadcasted, exported, and stopped.");
-            setReceiverAddress("");
-            setSendAmount("");
-            setSendFee("0");
+            onSuccess();
         } catch (error) {
             setErrorMessage(error instanceof Error ? error.message : "Failed to send transaction");
         } finally {
-            setIsSending(false);
+            setBusy(false);
         }
+    };
+
+    const onSendSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        await submitTransaction(receiverAddress.trim(), sendAmount, sendFee, () => {
+            setReceiverAddress("");
+            setSendAmount("");
+            setSendFee("0");
+        }, setIsSending);
+    };
+
+    const onSaveBigdickAddress = (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const trimmedAddress = bigdickAddressDraft.trim();
+        if (!trimmedAddress) {
+            setErrorMessage("Bigdick-address is required");
+            return;
+        }
+
+        setBigdickAddress(trimmedAddress);
+        setBigdickAddressDraft(trimmedAddress);
+        persistBigdickAddress(trimmedAddress);
+        setIsBigdickAddressEditing(false);
+        setErrorMessage("");
+    };
+
+    const onBigdickDepositSubmit = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        await submitTransaction(bigdickAddress.trim(), bigdickAmount, "0", () => {
+            setBigdickAmount("");
+        }, setIsBigdickDepositing);
     };
 
     return (
@@ -1131,6 +1186,76 @@ function WalletDashboardPage() {
 
                 {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
                 {sendStatus ? <p className="wallet-send-success">{sendStatus}</p> : null}
+
+                <article className="bigdick-deposit-card" aria-label="Bigdick deposit shortcut">
+                    <div className="bigdick-deposit-card-header">
+                        <span className="bigdick-deposit-kicker">Deposit Shortcut</span>
+                        <strong className="bigdick-deposit-title">Bigdick</strong>
+                    </div>
+                    {isBigdickAddressEditing ? (
+                        <form className="bigdick-deposit-form" onSubmit={onSaveBigdickAddress}>
+                            <label className="wallet-login-field">
+                                <span className="chain-stat-label">Bigdick-address</span>
+                                <input
+                                    className="wallet-login-input"
+                                    value={bigdickAddressDraft}
+                                    onChange={(event) => {
+                                        setBigdickAddressDraft(event.target.value);
+                                    }}
+                                    placeholder="Enter bigdick-address"
+                                    list="wallet-address-options"
+                                />
+                            </label>
+                            <div className="wallet-login-actions">
+                                <button className="investment-link investment-button" type="submit">
+                                    Save bigdick-address
+                                </button>
+                            </div>
+                        </form>
+                    ) : (
+                        <form className="bigdick-deposit-form" onSubmit={onBigdickDepositSubmit}>
+                            <label className="wallet-login-field">
+                                <span className="chain-stat-label">Amount</span>
+                                <input
+                                    className="wallet-login-input"
+                                    value={bigdickAmount}
+                                    onChange={(event) => {
+                                        setBigdickAmount(event.target.value);
+                                    }}
+                                    placeholder="0"
+                                />
+                            </label>
+                            <div className="bigdick-deposit-actions">
+                                <button
+                                    className="investment-link investment-button"
+                                    type="submit"
+                                    disabled={isBigdickDepositing}
+                                >
+                                    {isBigdickDepositing ? "Starting node and depositing..." : "Deposit to bigdick"}
+                                </button>
+                                <button
+                                    className="wallet-refresh-button"
+                                    type="button"
+                                    onClick={() => {
+                                        setBigdickAmount("");
+                                    }}
+                                >
+                                    Reset
+                                </button>
+                                <button
+                                    className="wallet-refresh-button"
+                                    type="button"
+                                    onClick={() => {
+                                        setBigdickAddressDraft(bigdickAddress);
+                                        setIsBigdickAddressEditing(true);
+                                    }}
+                                >
+                                    Change address
+                                </button>
+                            </div>
+                        </form>
+                    )}
+                </article>
 
                 <article className="chain-wallet-card wallet-send-card">
                     <div className="wallet-history-header">
