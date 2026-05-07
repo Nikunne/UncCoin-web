@@ -1154,7 +1154,7 @@ function WalletDashboardPage() {
                 <p className="masthead-kicker">Wallet Dashboard</p>
                 <h1 className="balances-title">My UncCoin Wallet</h1>
                 <p className="masthead-subtitle">
-                    Browser-creaed wallets can send money using this interface. Be aware that the transaction time is dependant on current mining efforts.
+                    Browser-creaed wallets can send money using this interface. Be athereware that the transaction time is dependant on current mining efforts.
                 </p>
             </header>
 
