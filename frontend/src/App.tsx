@@ -1000,6 +1000,7 @@ function WalletDashboardPage() {
     const [isBigdickDepositing, setIsBigdickDepositing] = useState(false);
     const [receiverOptions, setReceiverOptions] = useState<string[]>([]);
     const [historyAddressFilter, setHistoryAddressFilter] = useState("");
+    const [bigdickInfoOpen, setBigdickInfoOpen] = useState(false);
 
     useEffect(() => {
         const storedWalletToken = loadStoredWalletToken();
@@ -1288,7 +1289,22 @@ function WalletDashboardPage() {
                                 >
                                     Change address
                                 </button>
+                                <button
+                                    className="wallet-refresh-button bigdick-info-button"
+                                    type="button"
+                                    aria-label="What is this?"
+                                    onClick={() => setBigdickInfoOpen((o) => !o)}
+                                >
+                                    ?
+                                </button>
                             </div>
+                            {bigdickInfoOpen && (
+                                <p className="bigdick-info-text">
+                                    Store your <strong>bigdick.fyi</strong> deposit wallet address here so you
+                                    don't have to paste it every time. Once saved, entering an amount and
+                                    hitting "Deposit" sends UncCoins straight to your bigdick.fyi account.
+                                </p>
+                            )}
                         </form>
                     )}
                 </article>
