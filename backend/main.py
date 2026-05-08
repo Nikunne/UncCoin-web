@@ -83,6 +83,8 @@ BETTING_SHARK_ADDRESS = os.getenv("UNC_BETTING_SHARK_ADDRESS", "").strip()
 API_SWEEP_ENABLED = os.getenv("UNC_API_SWEEP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 API_SWEEP_INTERVAL_SECONDS = int(os.getenv("UNC_API_SWEEP_INTERVAL_SECONDS", "60"))
 API_SWEEP_FEE = os.getenv("UNC_API_SWEEP_FEE", "0").strip()
+WALLET_WARMUP_ENABLED = os.getenv("UNC_WALLET_WARMUP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+WALLET_WARMUP_INTERVAL_SECONDS = int(os.getenv("UNC_WALLET_WARMUP_INTERVAL_SECONDS", "300"))
 CORS_ALLOWED_ORIGINS = tuple(
     origin.strip()
     for origin in os.getenv("UNC_CORS_ALLOWED_ORIGINS", "").split(",")
@@ -100,6 +102,8 @@ wallet_sessions_lock = asyncio.Lock()
 node_command_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
 api_sweep_task: asyncio.Task | None = None
+wallet_warmup_task: asyncio.Task | None = None
+wallet_last_warmed: Dict[str, float] = {}
 WALLET_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
 UNCCOIN_ADDRESS_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 app_settings: Dict[str, str] = {"bonus_amount": DEFAULT_BONUS_AMOUNT}
@@ -1364,6 +1368,17 @@ async def broadcast_tx_command(
         detail = output.rsplit("Rejected local transaction ", maxsplit=1)[-1].strip()
         raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
 
+    # Wait briefly for the peer to propagate a rejection (e.g. nonce mismatch).
+    # "Broadcast transaction" is emitted locally before the peer responds, so a
+    # rejection from the peer appears a moment later in the same output stream.
+    await asyncio.sleep(3)
+    post_lines = list(runner.output_lines)[start_index:]
+    for line in reversed(post_lines):
+        if "nonce does not match" in line or (
+            "Rejected transaction" in line and "Rejected local transaction" not in line
+        ):
+            raise HTTPException(status_code=409, detail=f"Transaction rejected by network: {line.strip()}")
+
 
 async def add_peer_command(runner: InteractiveNodeRunner, peer_address: str) -> None:
     start_index = await runner.send_command_with_marker(f"add-peer {peer_address}")
@@ -1401,6 +1416,55 @@ async def connect_to_any_configured_peer(runner: InteractiveNodeRunner) -> None:
     )
 
 
+async def warm_wallet_node(wallet_record: Dict[str, Any]) -> None:
+    wallet_address = str(wallet_record["wallet_address"]).strip()
+    node_port = int(wallet_record["node_port"])
+    runner = InteractiveNodeRunner(str(wallet_record["internal_wallet_name"]).strip(), node_port)
+    try:
+        await runner.start()
+        await runner.wait_until_ready()
+        await connect_to_any_configured_peer(runner)
+        await runner.send_command("sync")
+        await runner.wait_for_sync_settle(timeout_seconds=15)
+        await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
+        await runner.sleep(1)
+        await load_blockchain_once()
+        await seed_wallet_blockchain_state(wallet_address)
+        wallet_last_warmed[wallet_address] = asyncio.get_running_loop().time()
+        print(f"Warmup: synced wallet {wallet_address[:16]}...")
+    except Exception as error:
+        print(f"Warmup: failed for wallet {wallet_address[:16]}: {error}")
+    finally:
+        await runner.close()
+
+
+async def wallet_warmup_loop() -> None:
+    while True:
+        async with browser_wallets_lock:
+            candidates = [
+                dict(record)
+                for record in browser_wallets.values()
+                if isinstance(record, dict) and str(record.get("wallet_address", "")).strip()
+            ]
+
+        # Spread warmups evenly so every wallet is hit within the target interval.
+        # E.g. 100 wallets, 300s target → sleep 3s between each warmup.
+        sleep_seconds = max(1.0, WALLET_WARMUP_INTERVAL_SECONDS / max(len(candidates), 1))
+        await asyncio.sleep(sleep_seconds)
+
+        if not candidates or node_command_lock.locked():
+            continue
+
+        now = asyncio.get_running_loop().time()
+        target = min(candidates, key=lambda w: wallet_last_warmed.get(str(w["wallet_address"]).strip(), 0))
+        last_warmed = wallet_last_warmed.get(str(target["wallet_address"]).strip(), 0)
+        if now - last_warmed < WALLET_WARMUP_INTERVAL_SECONDS:
+            continue
+
+        async with node_command_lock:
+            await warm_wallet_node(target)
+
+
 async def send_unccoin_transaction_with_bonus(
     wallet_record: Dict[str, Any],
     receiver_address: str,
@@ -1436,6 +1500,11 @@ async def send_unccoin_transaction_with_bonus(
             await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
             await runner.sleep(1)
             await load_blockchain_once()
+            # Re-seed from the synced chain so the wallet's nonce reflects the
+            # canonical chain state rather than the (possibly stale/forked) seed
+            # that was written before the node started.
+            await seed_wallet_blockchain_state(wallet_address)
+            wallet_last_warmed[wallet_address] = asyncio.get_running_loop().time()
             await require_available_wallet_balance(wallet_address, required_total)
             sync_deadline = asyncio.get_running_loop().time() + max(SYNC_WAIT_SECONDS, SYNC_MAX_WAIT_SECONDS)
             while True:
@@ -1528,6 +1597,8 @@ async def lifespan(app: FastAPI):
     refresh_task = asyncio.create_task(refresh_loop())
     if API_SWEEP_ENABLED and BETTING_SHARK_ADDRESS:
         api_sweep_task = asyncio.create_task(api_sweep_loop())
+    if WALLET_WARMUP_ENABLED:
+        wallet_warmup_task = asyncio.create_task(wallet_warmup_loop())
 
     try:
         yield
@@ -1542,6 +1613,12 @@ async def lifespan(app: FastAPI):
             api_sweep_task.cancel()
             try:
                 await api_sweep_task
+            except asyncio.CancelledError:
+                pass
+        if wallet_warmup_task:
+            wallet_warmup_task.cancel()
+            try:
+                await wallet_warmup_task
             except asyncio.CancelledError:
                 pass
 

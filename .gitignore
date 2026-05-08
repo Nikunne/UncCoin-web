@@ -1,3 +1,5 @@
 /scripts
 .env
 backend/.env
+/prod
+/.idea

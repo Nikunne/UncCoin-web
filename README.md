@@ -27,6 +27,12 @@ UNC_API_SWEEP_INTERVAL_SECONDS=60
 UNC_API_SWEEP_FEE=0
 UNC_PEER_ADDRESSES=100.76.78.49:4040,100.71.105.5:4000
 UNC_CORS_ALLOWED_ORIGINS=https://other-app.example
+
+# Background wallet warmup — keeps each wallet's seed file fresh so transactions
+# don't need a full sync. One wallet is warmed every 30s check cycle; each wallet
+# is re-synced at most every UNC_WALLET_WARMUP_INTERVAL_SECONDS seconds.
+UNC_WALLET_WARMUP_ENABLED=true
+UNC_WALLET_WARMUP_INTERVAL_SECONDS=300
 ```
 
 `UNC_WEB_API_TOKEN` is the shared secret used by the other site's server. Never expose it in browser code.
@@ -196,6 +202,49 @@ curl https://your-domain/api/balances \
 curl https://your-domain/api/wallets/wallet-address \
   -H "Authorization: Bearer $UNC_WEB_API_TOKEN"
 ```
+
+## Stale Nonce Recovery
+
+**Symptom:** Transactions are rejected by the network with a message like
+`transaction nonce 44 does not match expected nonce 38`, or the API returns HTTP 409 with
+`"Transaction rejected by network: ... nonce does not match"`.
+
+**Cause:** The local rigga-controller node drifted onto a fork (common when a network peer
+mines very fast — one block per second can pull the canonical chain away from the local
+node before it catches up). The wallet seed files in `UncCoin/state/blockchains/` then
+contain stale transaction history, making every ephemeral tx node compute the wrong nonce.
+
+**Recovery (run on the prod server):**
+
+```bash
+# 1. Delete all stale wallet seed files — safe to delete everything here,
+#    they are regenerated on the next send for each wallet.
+rm ~/UncCoin/state/blockchains/*.json
+
+# 2. Stop the rigga-controller node.
+sudo systemctl stop rigga-controller
+
+# 3. If the node is still on a bad fork after step 2 + restart, also wipe its
+#    local chain data so it resyncs from scratch (takes a few minutes to catch up).
+#    Only do this if step 1+2+restart didn't fix it.
+rm -rf ~/UncCoin/state/blockchain/
+
+# 4. Restart and wait for sync.
+sudo systemctl start rigga-controller
+journalctl -u rigga-controller -f   # watch for "Chain sync" / "Auto-mined block" lines
+```
+
+After the node resyncs, `blockchain.json` reflects the canonical chain and all subsequent
+transactions will use the correct nonce.
+
+**How to tell if it's fixed:** After restart, watch the logs for a few blocks. If you see
+`Auto-mined block` lines advancing alongside the rest of the network (same height range),
+the fork is resolved.
+
+**Prevention:** The code now re-seeds each wallet's blockchain state file from the synced
+chain after every successful transaction, so the drift window is smaller. If a fast miner
+causes another fork, symptoms will surface quickly as a 409 error (rather than silent
+failure) and the recovery above fixes it.
 
 ## Local Commands
 
