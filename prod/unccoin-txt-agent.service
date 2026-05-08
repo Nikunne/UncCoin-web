@@ -1,0 +1,14 @@
+[Unit]
+Description=UncCoin txt copy agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hus/krypto
+ExecStart=/usr/bin/python3 /home/hus/krypto/txtcopy.py
+Restart=always
+RestartSec=5
+User=hus
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Rigga agent controller
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hus/krypto/UncCoin
+ExecStart=/usr/bin/python3 /home/hus/krypto/UncCoin/riggacontroller.py
+Restart=always
+RestartSec=5
+User=hus
+
+[Install]
+WantedBy=multi-user.target
