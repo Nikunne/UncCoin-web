@@ -11,7 +11,9 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -81,6 +83,11 @@ DEFAULT_BONUS_AMOUNT = "1"
 RECENT_WALLET_ACTIVITY_LIMIT = 40
 EXTERNAL_API_TOKEN = os.getenv("UNC_WEB_API_TOKEN", "").strip()
 BETTING_SHARK_ADDRESS = os.getenv("UNC_BETTING_SHARK_ADDRESS", "").strip()
+ADMIN_WALLET_ADDRESS = os.getenv("UNC_ADMIN_WALLET_ADDRESS", "").strip()
+SESSION_TTL_SECONDS = int(os.getenv("UNC_SESSION_TTL_SECONDS", str(24 * 3600)))
+LOGIN_RATE_LIMIT_MAX = int(os.getenv("UNC_LOGIN_RATE_LIMIT_MAX", "10"))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("UNC_LOGIN_RATE_LIMIT_WINDOW_SECONDS", "60"))
+MAX_REQUEST_BODY_BYTES = int(os.getenv("UNC_MAX_REQUEST_BODY_BYTES", str(64 * 1024)))
 API_SWEEP_ENABLED = os.getenv("UNC_API_SWEEP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 API_SWEEP_INTERVAL_SECONDS = int(os.getenv("UNC_API_SWEEP_INTERVAL_SECONDS", "60"))
 API_SWEEP_FEE = os.getenv("UNC_API_SWEEP_FEE", "0").strip()
@@ -101,6 +108,9 @@ browser_wallets_lock = asyncio.Lock()
 wallet_sessions: Dict[str, Dict[str, str]] = {}
 wallet_sessions_lock = asyncio.Lock()
 node_command_lock = asyncio.Lock()
+# Maps IP -> list of attempt timestamps for login rate limiting
+login_attempts: Dict[str, list] = {}
+login_attempts_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
 api_sweep_task: asyncio.Task | None = None
 wallet_warmup_task: asyncio.Task | None = None
@@ -122,9 +132,9 @@ class BrowserWalletCreateRequest(BaseModel):
 
 
 class BrowserWalletSendRequest(BaseModel):
-    receiver_address: str
-    amount: str
-    fee: str = "0"
+    receiver_address: str = Field(max_length=64)
+    amount: str = Field(max_length=30)
+    fee: str = Field(default="0", max_length=30)
 
 
 class ApiWalletCreateRequest(BaseModel):
@@ -255,6 +265,11 @@ def hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]
 def verify_password(password: str, salt_hex: str, password_hash: str) -> bool:
     _, candidate_hash = hash_password(password, salt_hex)
     return secrets.compare_digest(candidate_hash, password_hash)
+
+
+# Precomputed dummy credential used to equalise timing when a wallet is not found,
+# preventing an attacker from learning whether a wallet name/address exists.
+_DUMMY_SALT, _DUMMY_HASH = hash_password("dummy-password-for-timing-equalisation")
 
 
 def collect_wallet_addresses(chain_data: Dict[str, Any]) -> set[str]:
@@ -900,12 +915,37 @@ async def create_session_for_wallet(wallet_record: Dict[str, Any]) -> str:
 async def get_wallet_address_for_token(token: str) -> str | None:
     async with wallet_sessions_lock:
         session = wallet_sessions.get(token)
-        return session.get("wallet_address") if session else None
+        if not session:
+            return None
+        created_at_str = session.get("created_at", "")
+        try:
+            created_at = datetime.fromisoformat(created_at_str)
+            age = (datetime.now(UTC) - created_at).total_seconds()
+            if age > SESSION_TTL_SECONDS:
+                wallet_sessions.pop(token, None)
+                return None
+        except (ValueError, TypeError):
+            wallet_sessions.pop(token, None)
+            return None
+        return session.get("wallet_address")
 
 
 async def delete_session(token: str) -> None:
     async with wallet_sessions_lock:
         wallet_sessions.pop(token, None)
+
+
+async def check_login_rate_limit(ip: str) -> None:
+    now = asyncio.get_running_loop().time()
+    window_start = now - LOGIN_RATE_LIMIT_WINDOW_SECONDS
+    async with login_attempts_lock:
+        attempts = login_attempts.get(ip, [])
+        attempts = [t for t in attempts if t > window_start]
+        if len(attempts) >= LOGIN_RATE_LIMIT_MAX:
+            login_attempts[ip] = attempts
+            raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+        attempts.append(now)
+        login_attempts[ip] = attempts
 
 
 def require_bearer_token(authorization: str | None) -> str:
@@ -985,14 +1025,16 @@ async def create_unccoin_wallet(wallet_label: str) -> tuple[str, str]:
     exit_code, output = await run_subprocess(command, UNCCOIN_REPO)
 
     if exit_code != 0:
-        raise HTTPException(status_code=500, detail=f"Wallet creation failed:\n{output.strip()}")
+        print(f"Wallet creation failed (exit {exit_code}):\n{output.strip()}")
+        raise HTTPException(status_code=500, detail="Wallet creation failed. Check server logs.")
 
     wallet_path = get_unccoin_wallet_file(internal_wallet_name)
     saved_path_line = next((line for line in output.splitlines() if line.startswith("Saved to: ")), "")
     address_line = next((line for line in output.splitlines() if line.startswith("Address: ")), "")
     wallet_address = address_line.replace("Address: ", "", 1).strip()
     if not wallet_address:
-        raise HTTPException(status_code=500, detail=f"Could not parse wallet address from output:\n{output.strip()}")
+        print(f"Could not parse wallet address from output:\n{output.strip()}")
+        raise HTTPException(status_code=500, detail="Wallet creation failed. Check server logs.")
 
     if saved_path_line:
         reported_path = Path(saved_path_line.replace("Saved to: ", "", 1).strip())
@@ -1030,18 +1072,14 @@ async def resolve_unccoin_wallet_address(wallet_name: str) -> str:
     exit_code, output = await run_subprocess(command, UNCCOIN_REPO)
 
     if exit_code != 0:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load local UncCoin wallet '{wallet_name}'.\n{output.strip()}",
-        )
+        print(f"Failed to load local UncCoin wallet '{wallet_name}' (exit {exit_code}):\n{output.strip()}")
+        raise HTTPException(status_code=500, detail="Failed to load wallet. Check server logs.")
 
     address_line = next((line for line in output.splitlines() if line.startswith("Address: ")), "")
     wallet_address = address_line.replace("Address: ", "", 1).strip()
     if not wallet_address:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not parse wallet address for local UncCoin wallet '{wallet_name}'.\n{output.strip()}",
-        )
+        print(f"Could not parse wallet address for '{wallet_name}':\n{output.strip()}")
+        raise HTTPException(status_code=500, detail="Failed to load wallet. Check server logs.")
 
     return wallet_address
 
@@ -1188,13 +1226,14 @@ class InteractiveNodeRunner:
             if self.process is not None and self.process.returncode is not None:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Node exited unexpectedly.\n{output}",
+                    detail="Node exited unexpectedly. Check server logs.",
                 )
 
             if asyncio.get_running_loop().time() >= deadline:
+                print(f"Timed out waiting for node response. Output:\n{output}")
                 raise HTTPException(
                     status_code=504,
-                    detail=f"Timed out waiting for node response.\n{output}",
+                    detail="Timed out waiting for node response.",
                 )
 
             await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
@@ -1238,16 +1277,12 @@ class InteractiveNodeRunner:
                 return
 
             if self.process is not None and self.process.returncode is not None:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Node exited unexpectedly during sync.\n{self.tail_output()}",
-                )
+                print(f"Node exited unexpectedly during sync. Output:\n{self.tail_output()}")
+                raise HTTPException(status_code=500, detail="Node exited unexpectedly during sync.")
 
             if current_time >= deadline:
-                raise HTTPException(
-                    status_code=504,
-                    detail=f"Timed out waiting for blockchain sync to settle.\n{self.tail_output()}",
-                )
+                print(f"Timed out waiting for sync to settle. Output:\n{self.tail_output()}")
+                raise HTTPException(status_code=504, detail="Timed out waiting for blockchain sync.")
 
             await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
 
@@ -1290,7 +1325,7 @@ class InteractiveNodeRunner:
         except TimeoutError as error:
             raise HTTPException(
                 status_code=504,
-                detail=f"Timed out waiting for node startup.\n{self.tail_output()}",
+                detail="Timed out waiting for node startup.",
             ) from error
 
     async def send_command(self, command: str) -> None:
@@ -1515,13 +1550,17 @@ async def send_unccoin_transaction_with_bonus(
                     break
 
                 if asyncio.get_running_loop().time() >= sync_deadline:
+                    print(
+                        "Timed out waiting for balance sync.\n"
+                        f"Needed: {required_total}, current: {current_balance}\n"
+                        f"{runner.tail_output()}"
+                    )
                     raise HTTPException(
                         status_code=504,
                         detail=(
-                            "Timed out waiting for the wallet balance to sync high enough for this transaction.\n"
-                            f"Needed: {required_total}\n"
-                            f"Current balance: {current_balance if current_balance is not None else 'unknown'}\n"
-                            f"{runner.tail_output()}"
+                            "Timed out waiting for the wallet balance to sync high enough.\n"
+                            f"Needed: {required_total}, "
+                            f"current: {current_balance if current_balance is not None else 'unknown'}"
                         ),
                     )
 
@@ -1629,6 +1668,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Wallet Balances API", lifespan=lifespan)
 
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_REQUEST_BODY_BYTES:
+            return Response("Request body too large", status_code=413)
+        return await call_next(request)
+
+
+app.add_middleware(RequestSizeLimitMiddleware)
+
 if CORS_ALLOWED_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
@@ -1660,17 +1710,23 @@ async def get_blockchain() -> Dict[str, Any]:
 
 
 @app.post("/wallet-login")
-async def wallet_login(payload: WalletLoginRequest) -> BrowserWalletSessionResponse:
-    login_identifier = payload.wallet_address.strip()
+async def wallet_login(payload: WalletLoginRequest, request: Request) -> BrowserWalletSessionResponse:
+    client_ip = request.client.host if request.client else "unknown"
+    await check_login_rate_limit(client_ip)
 
+    login_identifier = payload.wallet_address.strip()
     if not login_identifier:
         raise HTTPException(status_code=400, detail="Wallet name or address is required")
 
     wallet_record = await find_browser_wallet_by_login(login_identifier)
-    if not wallet_record:
-        raise HTTPException(status_code=401, detail="Unknown browser wallet name or address")
 
-    if not verify_password(payload.password, wallet_record["password_salt"], wallet_record["password_hash"]):
+    # Always run verify_password to equalise timing regardless of whether the
+    # wallet exists, preventing enumeration of valid wallet names via response time.
+    salt = wallet_record["password_salt"] if wallet_record else _DUMMY_SALT
+    pw_hash = wallet_record["password_hash"] if wallet_record else _DUMMY_HASH
+    password_ok = verify_password(payload.password, salt, pw_hash)
+
+    if not wallet_record or not password_ok:
         raise HTTPException(status_code=401, detail="Invalid wallet name/address or password")
 
     token = await create_session_for_wallet(wallet_record)
@@ -1758,7 +1814,6 @@ async def wallet_send(
         "ok": True,
         "wallet": wallet,
         "browser_wallet": format_browser_wallet_record(wallet_record),
-        "command_output": command_output,
         "bonus_amount": bonus_amount,
     }
 
@@ -1794,7 +1849,6 @@ async def wallet_send_stream(
                 "status": "done",
                 "wallet": wallet,
                 "browser_wallet": format_browser_wallet_record(wallet_record),
-                "command_output": command_output,
             })
         except HTTPException as exc:
             await event_queue.put({"status": "error", "code": exc.status_code, "detail": exc.detail})
@@ -1893,7 +1947,6 @@ async def api_send_transaction(
         },
         "broadcasts": broadcasts,
         "wallet": wallet,
-        "command_output": command_output,
     }
 
 
@@ -1972,7 +2025,7 @@ async def update_bonus_amount(
     authorization: str | None = Header(default=None),
 ) -> Dict[str, Any]:
     wallet_record = await require_authenticated_browser_wallet(authorization)
-    if wallet_record.get("wallet_name", "").strip().casefold() != "niklas":
+    if not ADMIN_WALLET_ADDRESS or wallet_record.get("wallet_address", "") != ADMIN_WALLET_ADDRESS:
         raise HTTPException(status_code=403, detail="Not authorized to update bonus amount")
     bonus_amount = await set_bonus_amount_setting(payload.bonus_amount)
     return {
