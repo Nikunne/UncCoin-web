@@ -1110,7 +1110,7 @@ function WalletDashboardPage() {
             setBrowserWallet(response.browser_wallet);
             setWallet(response.wallet);
             setLastUpdated(new Date());
-            setSendStatus("Transaction submitted. The node was started, synced, broadcasted, exported, and stopped.");
+            setSendStatus("Sent.");
             onSuccess();
         } catch (error) {
             setErrorMessage(error instanceof Error ? error.message : "Failed to send transaction");
@@ -1188,7 +1188,11 @@ function WalletDashboardPage() {
                 </div>
 
                 {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
-                {sendStatus ? <p className="wallet-send-success">{sendStatus}</p> : null}
+                {isSending || isBigdickDepositing ? (
+                    <p className="wallet-send-success">Sending — you can safely leave this page.</p>
+                ) : sendStatus ? (
+                    <p className="wallet-send-success">{sendStatus}</p>
+                ) : null}
 
                 <article className="bigdick-deposit-card" aria-label="Bigdick deposit shortcut">
                     <div className="bigdick-deposit-card-header">
@@ -1234,7 +1238,7 @@ function WalletDashboardPage() {
                                     type="submit"
                                     disabled={isBigdickDepositing}
                                 >
-                                    {isBigdickDepositing ? "Starting node and depositing..." : "Deposit to bigdick"}
+                                    {isBigdickDepositing ? "Sending..." : "Deposit to bigdick"}
                                 </button>
                                 <button
                                     className="wallet-refresh-button"
@@ -1331,7 +1335,7 @@ function WalletDashboardPage() {
                         </div>
                         <div className="wallet-login-actions">
                             <button className="investment-link investment-button" type="submit" disabled={isSending}>
-                                {isSending ? "Starting node and sending..." : "Send UncCoins"}
+                                {isSending ? "Sending..." : "Send UncCoins"}
                             </button>
                         </div>
                     </form>
