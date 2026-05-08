@@ -9,10 +9,11 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, AsyncGenerator, Awaitable, Callable, Dict
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 
@@ -1471,6 +1472,7 @@ async def send_unccoin_transaction_with_bonus(
     amount: str,
     fee: str,
     bonus_amount: str,
+    on_broadcast: Callable[[], Awaitable[None]] | None = None,
 ) -> str:
     if not receiver_address.strip():
         raise HTTPException(status_code=400, detail="Receiver wallet address is required")
@@ -1527,6 +1529,8 @@ async def send_unccoin_transaction_with_bonus(
                 await asyncio.sleep(BALANCE_POLL_INTERVAL_SECONDS)
 
             await broadcast_tx_command(runner, receiver_address, amount, fee)
+            if on_broadcast:
+                await on_broadcast()
             if bonus_decimal > 0:
                 try:
                     await broadcast_tx_command(runner, BONUS_RECEIVER_ADDRESS, str(bonus_decimal), "0")
@@ -1757,6 +1761,62 @@ async def wallet_send(
         "command_output": command_output,
         "bonus_amount": bonus_amount,
     }
+
+
+@app.post("/wallet-send-stream")
+async def wallet_send_stream(
+    payload: BrowserWalletSendRequest,
+    authorization: str | None = Header(default=None),
+) -> StreamingResponse:
+    wallet_record = await require_authenticated_browser_wallet(authorization)
+    bonus_amount = await get_bonus_amount_setting()
+    event_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+
+    async def on_broadcast() -> None:
+        await event_queue.put({"status": "broadcast"})
+
+    async def run() -> None:
+        try:
+            command_output = await send_unccoin_transaction_with_bonus(
+                wallet_record=wallet_record,
+                receiver_address=payload.receiver_address,
+                amount=payload.amount,
+                fee=payload.fee,
+                bonus_amount=bonus_amount,
+                on_broadcast=on_broadcast,
+            )
+            wallet = await get_wallet_summary(
+                wallet_record["wallet_address"],
+                require_chain_presence=False,
+                activity_limit=RECENT_WALLET_ACTIVITY_LIMIT,
+            )
+            await event_queue.put({
+                "status": "done",
+                "wallet": wallet,
+                "browser_wallet": format_browser_wallet_record(wallet_record),
+                "command_output": command_output,
+            })
+        except HTTPException as exc:
+            await event_queue.put({"status": "error", "code": exc.status_code, "detail": exc.detail})
+        except Exception as exc:
+            await event_queue.put({"status": "error", "code": 500, "detail": str(exc)})
+
+    async def generate() -> AsyncGenerator[str, None]:
+        task = asyncio.create_task(run())
+        try:
+            while True:
+                event = await event_queue.get()
+                yield f"data: {json.dumps(event)}\n\n"
+                if event["status"] in ("done", "error"):
+                    break
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.post("/wallets")

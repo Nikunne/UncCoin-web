@@ -260,8 +260,9 @@ export async function sendWalletTransaction(
     receiverAddress: string,
     amount: string,
     fee: string,
+    onBroadcast?: () => void,
 ): Promise<Omit<WalletSession, "token"> & { command_output?: string }> {
-    const response = await fetch(`${API_BASE_URL}/wallet-send`, {
+    const response = await fetch(`${API_BASE_URL}/wallet-send-stream`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -278,11 +279,46 @@ export async function sendWalletTransaction(
         await parseError(response);
     }
 
-    const data = normalizeWalletSessionResponse(await response.json());
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result: ReturnType<typeof normalizeWalletSessionResponse> | null = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const event = JSON.parse(line.slice(6)) as {
+                status: string;
+                code?: number;
+                detail?: unknown;
+                wallet?: unknown;
+                browser_wallet?: unknown;
+                command_output?: string;
+            };
+            if (event.status === "broadcast") {
+                onBroadcast?.();
+            } else if (event.status === "done") {
+                result = normalizeWalletSessionResponse(event);
+            } else if (event.status === "error") {
+                const detail = event.detail;
+                const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
+                throw new Error(msg);
+            }
+        }
+    }
+
+    if (!result) throw new Error("Transaction stream ended unexpectedly");
     return {
-        browser_wallet: data.browser_wallet,
-        wallet: data.wallet,
-        command_output: data.command_output,
+        browser_wallet: result.browser_wallet,
+        wallet: result.wallet,
+        command_output: result.command_output,
     };
 }
 

@@ -991,6 +991,7 @@ function WalletDashboardPage() {
     const [sendAmount, setSendAmount] = useState("");
     const [sendFee, setSendFee] = useState("0");
     const [sendStatus, setSendStatus] = useState("");
+    const [bigdickSendStatus, setBigdickSendStatus] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [bigdickAddress, setBigdickAddress] = useState(loadStoredBigdickAddress());
     const [bigdickAddressDraft, setBigdickAddressDraft] = useState(loadStoredBigdickAddress());
@@ -998,6 +999,7 @@ function WalletDashboardPage() {
     const [isBigdickAddressEditing, setIsBigdickAddressEditing] = useState(!loadStoredBigdickAddress());
     const [isBigdickDepositing, setIsBigdickDepositing] = useState(false);
     const [receiverOptions, setReceiverOptions] = useState<string[]>([]);
+    const [historyAddressFilter, setHistoryAddressFilter] = useState("");
 
     useEffect(() => {
         const storedWalletToken = loadStoredWalletToken();
@@ -1090,13 +1092,14 @@ function WalletDashboardPage() {
         fee: string,
         onSuccess: () => void,
         setBusy: (value: boolean) => void,
+        setStatus: (s: string) => void,
     ) => {
         if (!walletToken) {
             return;
         }
 
         setBusy(true);
-        setSendStatus("");
+        setStatus("");
         setErrorMessage("");
 
         if (!trimmedReceiverAddress) {
@@ -1106,15 +1109,22 @@ function WalletDashboardPage() {
         }
 
         try {
-            const response = await sendWalletTransaction(walletToken, trimmedReceiverAddress, amount, fee);
+            const response = await sendWalletTransaction(
+                walletToken,
+                trimmedReceiverAddress,
+                amount,
+                fee,
+                () => setStatus("sent"),
+            );
             setBrowserWallet(response.browser_wallet);
             setWallet(response.wallet);
             setLastUpdated(new Date());
-            setSendStatus("Sent.");
             onSuccess();
         } catch (error) {
+            setStatus("");
             setErrorMessage(error instanceof Error ? error.message : "Failed to send transaction");
         } finally {
+            setStatus("");
             setBusy(false);
         }
     };
@@ -1125,7 +1135,7 @@ function WalletDashboardPage() {
             setReceiverAddress("");
             setSendAmount("");
             setSendFee("0");
-        }, setIsSending);
+        }, setIsSending, setSendStatus);
     };
 
     const onSaveBigdickAddress = (event: FormEvent<HTMLFormElement>) => {
@@ -1147,7 +1157,7 @@ function WalletDashboardPage() {
         event.preventDefault();
         await submitTransaction(bigdickAddress.trim(), bigdickAmount, "0", () => {
             setBigdickAmount("");
-        }, setIsBigdickDepositing);
+        }, setIsBigdickDepositing, setBigdickSendStatus);
     };
 
     return (
@@ -1188,11 +1198,25 @@ function WalletDashboardPage() {
                 </div>
 
                 {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
-                {isSending || isBigdickDepositing ? (
-                    <p className="wallet-send-success">Sending — you can safely leave this page.</p>
-                ) : sendStatus ? (
-                    <p className="wallet-send-success">{sendStatus}</p>
-                ) : null}
+
+                <div className="chain-stats">
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Balance</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.balance ?? 0)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Transactions</span>
+                        <strong className="chain-stat-value">{wallet?.transaction_count ?? 0}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Received</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_received ?? 0)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Sent</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_sent ?? 0)}</strong>
+                    </article>
+                </div>
 
                 <article className="bigdick-deposit-card" aria-label="Bigdick deposit shortcut">
                     <div className="bigdick-deposit-card-header">
@@ -1232,6 +1256,11 @@ function WalletDashboardPage() {
                                     placeholder="0"
                                 />
                             </label>
+                            {bigdickSendStatus === "sent" ? (
+                                <p className="wallet-send-success">Sent</p>
+                            ) : isBigdickDepositing ? (
+                                <p className="wallet-send-success">Sending — you can safely leave this page.</p>
+                            ) : null}
                             <div className="bigdick-deposit-actions">
                                 <button
                                     className="investment-link investment-button"
@@ -1333,6 +1362,11 @@ function WalletDashboardPage() {
                                 />
                             </label>
                         </div>
+                        {sendStatus === "sent" ? (
+                            <p className="wallet-send-success">Sent</p>
+                        ) : isSending ? (
+                            <p className="wallet-send-success">Sending — you can safely leave this page.</p>
+                        ) : null}
                         <div className="wallet-login-actions">
                             <button className="investment-link investment-button" type="submit" disabled={isSending}>
                                 {isSending ? "Sending..." : "Send UncCoins"}
@@ -1340,25 +1374,6 @@ function WalletDashboardPage() {
                         </div>
                     </form>
                 </article>
-
-                <div className="chain-stats">
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Balance</span>
-                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.balance ?? 0)}</strong>
-                    </article>
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Transactions</span>
-                        <strong className="chain-stat-value">{wallet?.transaction_count ?? 0}</strong>
-                    </article>
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Received</span>
-                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_received ?? 0)}</strong>
-                    </article>
-                    <article className="chain-stat-card">
-                        <span className="chain-stat-label">Sent</span>
-                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_sent ?? 0)}</strong>
-                    </article>
-                </div>
 
                 <div className="chain-stats wallet-stats-grid">
                     <article className="chain-stat-card">
@@ -1396,9 +1411,25 @@ function WalletDashboardPage() {
                         <span className="wallet-history-count">{wallet?.activity.length ?? 0} entries</span>
                     </div>
 
+                    <input
+                        className="wallet-login-input"
+                        placeholder="Filter by address..."
+                        value={historyAddressFilter}
+                        onChange={(e) => setHistoryAddressFilter(e.target.value)}
+                    />
+
                     <div className="transaction-list wallet-history-list">
                         {wallet?.activity.length ? (
-                            wallet.activity.map((activity, index) => (
+                            wallet.activity
+                                .filter((activity) => {
+                                    if (!historyAddressFilter.trim()) return true;
+                                    const q = historyAddressFilter.trim().toLowerCase();
+                                    return (
+                                        activity.sender.toLowerCase().includes(q) ||
+                                        activity.receiver.toLowerCase().includes(q)
+                                    );
+                                })
+                                .map((activity, index) => (
                                 <div
                                     key={`${activity.block_id ?? "no-block"}-${activity.timestamp ?? "no-time"}-${index}`}
                                     className="transaction-row wallet-history-row"
@@ -1440,6 +1471,13 @@ function WalletDashboardPage() {
                         ) : (
                             <p className="empty-state">No wallet transactions found yet.</p>
                         )}
+                        {wallet?.activity.length && historyAddressFilter.trim() &&
+                            wallet.activity.filter((a) => {
+                                const q = historyAddressFilter.trim().toLowerCase();
+                                return a.sender.toLowerCase().includes(q) || a.receiver.toLowerCase().includes(q);
+                            }).length === 0 ? (
+                            <p className="empty-state">No transactions match that address.</p>
+                        ) : null}
                     </div>
                 </article>
             </section>
