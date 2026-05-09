@@ -631,6 +631,7 @@ async def save_browser_wallets_file() -> None:
 
 
 async def load_balances_once() -> None:
+    # Response format: {"tip_hash": ..., "height": N, "balances": [{"address": ..., "alias": ..., "balance": "123.45"}, ...]}
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{RIGGA_API_BASE}/balances", timeout=5.0)
@@ -639,7 +640,17 @@ async def load_balances_once() -> None:
         data = resp.json()
         if not isinstance(data, dict):
             return
-        parsed: Dict[str, float] = {addr: parse_amount(bal) for addr, bal in data.items()}
+        balance_list = data.get("balances", [])
+        if not isinstance(balance_list, list):
+            return
+        parsed: Dict[str, float] = {}
+        for entry in balance_list:
+            if not isinstance(entry, dict):
+                continue
+            addr = str(entry.get("address", "")).strip()
+            bal = parse_amount(entry.get("balance", 0))
+            if addr:
+                parsed[addr] = bal
         async with balances_lock:
             balances.clear()
             balances.update(parsed)
@@ -648,20 +659,35 @@ async def load_balances_once() -> None:
 
 
 async def load_blockchain_once() -> None:
+    # /chain/blocks is paginated (from_height, limit max 500). Fetch the most recent 500 blocks.
     try:
         async with httpx.AsyncClient() as client:
+            head_resp = await client.get(f"{RIGGA_API_BASE}/chain/head", timeout=5.0)
+            from_height = 0
+            if head_resp.status_code == 200:
+                head = head_resp.json()
+                if isinstance(head, dict):
+                    h = head.get("height", 0)
+                    if isinstance(h, int) and h > 499:
+                        from_height = h - 499
+
             blocks_resp, pending_resp = await asyncio.gather(
-                client.get(f"{RIGGA_API_BASE}/chain/blocks", timeout=10.0),
+                client.get(
+                    f"{RIGGA_API_BASE}/chain/blocks",
+                    params={"from_height": from_height, "limit": 500},
+                    timeout=30.0,
+                ),
                 client.get(f"{RIGGA_API_BASE}/transactions/pending", timeout=5.0),
                 return_exceptions=True,
             )
+
         chain_data: Dict[str, Any] = {}
         if isinstance(blocks_resp, httpx.Response) and blocks_resp.status_code == 200:
             data = blocks_resp.json()
-            if isinstance(data, list):
-                chain_data["blocks"] = data
-            elif isinstance(data, dict):
+            if isinstance(data, dict):
                 chain_data.update(data)
+            elif isinstance(data, list):
+                chain_data["blocks"] = data
         if isinstance(pending_resp, httpx.Response) and pending_resp.status_code == 200:
             chain_data["pending_transactions"] = pending_resp.json()
         if not chain_data:
