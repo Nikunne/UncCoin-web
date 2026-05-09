@@ -1180,13 +1180,14 @@ class NodeApiRunner:
         raise HTTPException(status_code=504, detail="Timed out waiting for blockchain sync.")
 
     async def get_balance(self, address: str) -> Decimal:
+        # Response: {"address": ..., "balance": "123.45", "tip_hash": ..., "height": ...}
         async with httpx.AsyncClient() as client:
             try:
-                resp = await client.get(f"{self.api_base}/balances", timeout=5.0)
+                resp = await client.get(f"{self.api_base}/balances/{address}", timeout=5.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     if isinstance(data, dict):
-                        return Decimal(str(data.get(address, "0")))
+                        return Decimal(str(data.get("balance", "0")))
             except (httpx.HTTPError, InvalidOperation):
                 pass
         return Decimal("0")
