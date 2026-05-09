@@ -691,7 +691,11 @@ async def load_blockchain_once() -> None:
             elif isinstance(data, list):
                 chain_data["blocks"] = data
         if isinstance(pending_resp, httpx.Response) and pending_resp.status_code == 200:
-            chain_data["pending_transactions"] = pending_resp.json()
+            pending_data = pending_resp.json()
+            if isinstance(pending_data, dict):
+                chain_data["pending_transactions"] = pending_data.get("transactions", [])
+            elif isinstance(pending_data, list):
+                chain_data["pending_transactions"] = pending_data
         if not chain_data:
             return
         async with blockchain_lock:
