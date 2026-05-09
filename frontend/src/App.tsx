@@ -1214,7 +1214,7 @@ function WalletDashboardPage() {
                             {bigdickSendStatus === "sent" ? (
                                 <p className="wallet-send-success">Sent</p>
                             ) : isBigdickDepositing ? (
-                                <p className="wallet-send-success">Sending — you can safely leave this page.</p>
+                                <p className="wallet-send-success">Sending — please keep this page open until complete.</p>
                             ) : null}
                             <div className="bigdick-deposit-actions">
                                 <button
@@ -1335,7 +1335,7 @@ function WalletDashboardPage() {
                         {sendStatus === "sent" ? (
                             <p className="wallet-send-success">Sent</p>
                         ) : isSending ? (
-                            <p className="wallet-send-success">Sending — you can safely leave this page.</p>
+                            <p className="wallet-send-success">Sending — please keep this page open until complete.</p>
                         ) : null}
                         <div className="wallet-login-actions">
                             <button className="investment-link investment-button" type="submit" disabled={isSending}>
