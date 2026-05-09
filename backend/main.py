@@ -1158,11 +1158,14 @@ class NodeApiRunner:
                 try:
                     resp = await client.get(f"{self.api_base}/health", timeout=2.0)
                     if resp.status_code == 200:
-                        return
+                        data = resp.json()
+                        peers = data.get("peers", {})
+                        if isinstance(peers, dict) and peers.get("connected", 0) >= 1:
+                            return
                 except httpx.HTTPError:
                     pass
                 await asyncio.sleep(0.5)
-        raise HTTPException(status_code=504, detail="Timed out waiting for node startup.")
+        raise HTTPException(status_code=504, detail="Timed out waiting for node startup and peer connection.")
 
     async def sync(self) -> None:
         deadline = asyncio.get_running_loop().time() + SYNC_MAX_WAIT_SECONDS
