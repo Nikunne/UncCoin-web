@@ -649,11 +649,13 @@ async def load_balances_once() -> None:
                 continue
             addr = str(entry.get("address", "")).strip()
             bal = parse_amount(entry.get("balance", 0))
-            if addr:
+            if addr and bal > 0:
                 parsed[addr] = bal
+        # Sort ascending so the frontend's .reverse() shows highest balance first
+        sorted_parsed = dict(sorted(parsed.items(), key=lambda x: x[1]))
         async with balances_lock:
             balances.clear()
-            balances.update(parsed)
+            balances.update(sorted_parsed)
     except Exception as error:
         print(f"Error loading balances from rigga API: {error}")
 
