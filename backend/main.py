@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -50,34 +51,32 @@ def load_env_file(path: Path) -> None:
 load_env_file(ENV_FILE)
 
 UNCCOIN_REPO = (WEB_ROOT.parent / "UncCoin").resolve()
-UNCCOIN_RUN_SCRIPT = UNCCOIN_REPO / "scripts" / "run.sh"
-UNCCOIN_BLOCKCHAINS_DIR = UNCCOIN_REPO / "state" / "blockchains"
 UNCCOIN_WALLETS_DIR = UNCCOIN_REPO / "state" / "wallets"
-PENGER_FILE = BASE_DIR / "penger.txt"
-BLOCKCHAIN_FILE = BASE_DIR / "blockchain.json"
 BROWSER_WALLETS_FILE = BASE_DIR / "browser_wallets.json"
 APP_SETTINGS_FILE = BASE_DIR / "app_settings.json"
 REFRESH_SECONDS = 10
 NODE_PORT_START = int(os.getenv("UNC_NODE_PORT_START", "8300"))
 NODE_PORT_END = int(os.getenv("UNC_NODE_PORT_END", "8500"))
 NODE_READY_TIMEOUT_SECONDS = int(os.getenv("UNC_NODE_READY_TIMEOUT_SECONDS", "45"))
-SYNC_WAIT_SECONDS = int(os.getenv("UNC_SYNC_WAIT_SECONDS", "15"))
-TX_WAIT_SECONDS = int(os.getenv("UNC_TX_WAIT_SECONDS", "5"))
+SYNC_MAX_WAIT_SECONDS = int(os.getenv("UNC_SYNC_MAX_WAIT_SECONDS", "60"))
 DEFAULT_PEER_ADDRESSES = tuple(
     peer_address.strip()
     for peer_address in os.getenv(
         "UNC_PEER_ADDRESSES",
-        os.getenv("UNC_PEER_ADDRESS", "100.76.78.49:4040,100.71.105.5:4000"),
+        os.getenv("UNC_PEER_ADDRESS", "100.76.78.49:4040"),
     ).split(",")
     if peer_address.strip()
 )
-OUTPUT_BALANCES_PATH = "../UncCoin-web/backend/penger.txt"
-OUTPUT_BLOCKCHAIN_PATH = "../UncCoin-web/backend/blockchain.json"
+RIGGA_NODE_P2P_PORT = int(os.getenv("UNC_RIGGA_PORT", "4040"))
+RIGGA_API_BASE = f"http://127.0.0.1:{RIGGA_NODE_P2P_PORT + 10000}/api/v1"
 PASSWORD_ITERATIONS = 240_000
-COMMAND_POLL_INTERVAL_SECONDS = 0.25
-SYNC_SETTLE_IDLE_SECONDS = float(os.getenv("UNC_SYNC_SETTLE_IDLE_SECONDS", "2.5"))
-SYNC_MAX_WAIT_SECONDS = int(os.getenv("UNC_SYNC_MAX_WAIT_SECONDS", "600"))
-BALANCE_POLL_INTERVAL_SECONDS = float(os.getenv("UNC_BALANCE_POLL_INTERVAL_SECONDS", "2"))
+
+
+def _find_python_bin() -> str:
+    venv_python = UNCCOIN_REPO / ".venv" / "bin" / "python3"
+    if venv_python.exists():
+        return str(venv_python)
+    return "python3"
 BONUS_RECEIVER_ADDRESS = "c5c9f38923a71ff93e03317e5afc25e66c786aea8413caea2e48dcc4ae81c7bb"
 DEFAULT_BONUS_AMOUNT = "1"
 RECENT_WALLET_ACTIVITY_LIMIT = 40
@@ -572,23 +571,6 @@ def get_pending_outgoing_total(chain_data: Dict[str, Any], wallet_address: str) 
     return pending_total
 
 
-def extract_broadcast_transactions(command_output: str) -> list[Dict[str, str]]:
-    transactions: list[Dict[str, str]] = []
-
-    for line in command_output.splitlines():
-        match = re.search(r"Broadcast transaction ([0-9a-f]+) from (\S+) to (\S+)", line)
-        if not match:
-            continue
-
-        transactions.append(
-            {
-                "transaction_id_prefix": match.group(1),
-                "sender_address": match.group(2),
-                "receiver_address": match.group(3),
-            }
-        )
-
-    return transactions
 
 
 async def get_available_wallet_balance(wallet_address: str) -> Decimal:
@@ -622,33 +604,6 @@ async def require_available_wallet_balance(wallet_address: str, required_total: 
         )
 
 
-def parse_penger_file(text: str) -> Dict[str, float]:
-    parsed: Dict[str, float] = {}
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        if line.endswith(":") and ":" not in line[:-1]:
-            continue
-
-        if ":" not in line:
-            continue
-
-        wallet, amount_str = line.split(":", 1)
-        wallet = wallet.strip()
-        amount_str = amount_str.strip()
-
-        if not wallet:
-            continue
-
-        try:
-            parsed[wallet] = float(amount_str)
-        except ValueError:
-            continue
-
-    return parsed
 
 
 def load_browser_wallets_file() -> Dict[str, Dict[str, Any]]:
@@ -675,84 +630,48 @@ async def save_browser_wallets_file() -> None:
 
 
 async def load_balances_once() -> None:
-    if not PENGER_FILE.exists():
-        return
-
     try:
-        text = PENGER_FILE.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        print(f"Error: {PENGER_FILE} not found.")
-        return
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{RIGGA_API_BASE}/balances", timeout=5.0)
+        if resp.status_code != 200:
+            return
+        data = resp.json()
+        if not isinstance(data, dict):
+            return
+        parsed: Dict[str, float] = {addr: parse_amount(bal) for addr, bal in data.items()}
+        async with balances_lock:
+            balances.clear()
+            balances.update(parsed)
     except Exception as error:
-        print(f"Error reading {PENGER_FILE}: {error}")
-        return
-
-    parsed = parse_penger_file(text)
-
-    async with balances_lock:
-        balances.clear()
-        balances.update(parsed)
+        print(f"Error loading balances from rigga API: {error}")
 
 
 async def load_blockchain_once() -> None:
-    if not BLOCKCHAIN_FILE.exists():
-        return
-
-    last_parse_error: json.JSONDecodeError | None = None
-    parsed: Any = None
-    for attempt in range(5):
-        try:
-            text = BLOCKCHAIN_FILE.read_text(encoding="utf-8")
-            parsed = json.loads(text)
-            last_parse_error = None
-            break
-        except FileNotFoundError:
-            print(f"Error: {BLOCKCHAIN_FILE} not found.")
+    try:
+        async with httpx.AsyncClient() as client:
+            blocks_resp, pending_resp = await asyncio.gather(
+                client.get(f"{RIGGA_API_BASE}/chain/blocks", timeout=10.0),
+                client.get(f"{RIGGA_API_BASE}/transactions/pending", timeout=5.0),
+                return_exceptions=True,
+            )
+        chain_data: Dict[str, Any] = {}
+        if isinstance(blocks_resp, httpx.Response) and blocks_resp.status_code == 200:
+            data = blocks_resp.json()
+            if isinstance(data, list):
+                chain_data["blocks"] = data
+            elif isinstance(data, dict):
+                chain_data.update(data)
+        if isinstance(pending_resp, httpx.Response) and pending_resp.status_code == 200:
+            chain_data["pending_transactions"] = pending_resp.json()
+        if not chain_data:
             return
-        except json.JSONDecodeError as error:
-            last_parse_error = error
-            if attempt < 4:
-                await asyncio.sleep(0.2)
-                continue
-        except Exception as error:
-            print(f"Error reading {BLOCKCHAIN_FILE}: {error}")
-            return
-
-    if last_parse_error is not None:
         async with blockchain_lock:
-            has_previous_snapshot = bool(blockchain)
-
-        if not has_previous_snapshot:
-            print(f"Error parsing {BLOCKCHAIN_FILE}: {last_parse_error}")
-        return
-
-    if not isinstance(parsed, dict):
-        print(f"Error: {BLOCKCHAIN_FILE} does not contain a JSON object.")
-        return
-
-    async with blockchain_lock:
-        blockchain.clear()
-        blockchain.update(parsed)
+            blockchain.clear()
+            blockchain.update(chain_data)
+    except Exception as error:
+        print(f"Error loading blockchain from rigga API: {error}")
 
 
-async def seed_wallet_blockchain_state(wallet_address: str) -> None:
-    async with blockchain_lock:
-        chain_data = dict(blockchain)
-
-    if not chain_data:
-        await load_blockchain_once()
-        async with blockchain_lock:
-            chain_data = dict(blockchain)
-
-    if not chain_data:
-        raise HTTPException(status_code=503, detail="Backend blockchain snapshot is not loaded")
-
-    seeded_state = dict(chain_data)
-    seeded_state["wallet_address"] = wallet_address
-
-    UNCCOIN_BLOCKCHAINS_DIR.mkdir(parents=True, exist_ok=True)
-    target_path = UNCCOIN_BLOCKCHAINS_DIR / f"{wallet_address}.json"
-    target_path.write_text(json.dumps(seeded_state, indent=2), encoding="utf-8")
 
 
 async def refresh_loop() -> None:
@@ -1163,205 +1082,131 @@ async def verify_wallet_record_identity(wallet_record: Dict[str, Any]) -> None:
         )
 
 
-class InteractiveNodeRunner:
+class NodeApiRunner:
+    """Manages an ephemeral UncCoin wallet node and communicates with it via HTTP API."""
+
     def __init__(self, wallet_name: str, node_port: int):
         self.wallet_name = wallet_name
         self.node_port = node_port
+        self.api_base = f"http://127.0.0.1:{node_port + 10000}/api/v1"
         self.process: asyncio.subprocess.Process | None = None
-        self.ready_event = asyncio.Event()
-        self.output_lines: deque[str] = deque(maxlen=400)
-        self.stream_task: asyncio.Task[None] | None = None
+        self.output_lines: deque[str] = deque(maxlen=200)
+        self._stream_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        command = [str(UNCCOIN_RUN_SCRIPT), self.wallet_name, str(self.node_port)]
-
+        cmd = [
+            _find_python_bin(), "-m", "node.cli",
+            "--host", "0.0.0.0",
+            "--wallet-name", self.wallet_name,
+            "--port", str(self.node_port),
+            "--no-interactive",
+            "--api-host", "127.0.0.1",
+            "--api-port", str(self.node_port + 10000),
+        ]
+        for peer in DEFAULT_PEER_ADDRESSES:
+            cmd += ["--peer", peer]
         self.process = await asyncio.create_subprocess_exec(
-            *command,
+            *cmd,
             cwd=str(UNCCOIN_REPO),
-            stdin=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        self.stream_task = asyncio.create_task(self._stream_output())
+        self._stream_task = asyncio.create_task(self._stream_output())
 
     async def _stream_output(self) -> None:
         if self.process is None or self.process.stdout is None:
             return
-
         while True:
             line = await self.process.stdout.readline()
             if not line:
                 break
-
-            decoded = line.decode("utf-8", errors="replace").rstrip()
-            self.output_lines.append(decoded)
-
-            if "Node ready." in decoded:
-                self.ready_event.set()
-
-    def tail_output(self) -> str:
-        return "\n".join(self.output_lines).strip()
-
-    async def wait_for_output(
-        self,
-        success_markers: list[str],
-        failure_markers: list[str] | None = None,
-        timeout_seconds: int = 15,
-        start_index: int = 0,
-    ) -> str:
-        deadline = asyncio.get_running_loop().time() + timeout_seconds
-        failure_markers = failure_markers or []
-
-        while True:
-            output = "\n".join(list(self.output_lines)[start_index:]).strip()
-
-            for marker in failure_markers:
-                if marker in output:
-                    return marker
-
-            for marker in success_markers:
-                if marker in output:
-                    return marker
-
-            if self.process is not None and self.process.returncode is not None:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Node exited unexpectedly. Check server logs.",
-                )
-
-            if asyncio.get_running_loop().time() >= deadline:
-                print(f"Timed out waiting for node response. Output:\n{output}")
-                raise HTTPException(
-                    status_code=504,
-                    detail="Timed out waiting for node response.",
-                )
-
-            await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
-
-    async def wait_for_sync_settle(
-        self,
-        timeout_seconds: int,
-        idle_seconds: float = SYNC_SETTLE_IDLE_SECONDS,
-    ) -> None:
-        sync_markers = [
-            "Chain chunk received from ",
-            "Requesting next chain chunk from ",
-            "Chain sync chunk processed: ",
-            "Chain sync from ",
-        ]
-
-        deadline = asyncio.get_running_loop().time() + timeout_seconds
-        start_time = asyncio.get_running_loop().time()
-        last_seen_sync_activity: float | None = None
-        seen_sync_activity = False
-        inspected_count = 0
-
-        while True:
-            current_time = asyncio.get_running_loop().time()
-            output_snapshot = list(self.output_lines)
-            new_lines = output_snapshot[inspected_count:]
-            inspected_count = len(output_snapshot)
-
-            for line in new_lines:
-                if any(marker in line for marker in sync_markers):
-                    seen_sync_activity = True
-                    last_seen_sync_activity = current_time
-
-                if "Stopping automatic sync." in line:
-                    return
-
-            if seen_sync_activity and last_seen_sync_activity is not None:
-                if current_time - last_seen_sync_activity >= idle_seconds:
-                    return
-            elif current_time - start_time >= idle_seconds:
-                return
-
-            if self.process is not None and self.process.returncode is not None:
-                print(f"Node exited unexpectedly during sync. Output:\n{self.tail_output()}")
-                raise HTTPException(status_code=500, detail="Node exited unexpectedly during sync.")
-
-            if current_time >= deadline:
-                print(f"Timed out waiting for sync to settle. Output:\n{self.tail_output()}")
-                raise HTTPException(status_code=504, detail="Timed out waiting for blockchain sync.")
-
-            await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
-
-    async def query_wallet_balance(self) -> Decimal | None:
-        if self.process is None:
-            return None
-
-        marker_before = len(self.output_lines)
-        await self.send_command("balance")
-        deadline = asyncio.get_running_loop().time() + 10
-
-        while True:
-            output_snapshot = list(self.output_lines)
-            new_lines = output_snapshot[marker_before:]
-
-            for line in new_lines:
-                if "Balance for " not in line:
-                    continue
-
-                _, _, balance_text = line.rpartition(": ")
-                try:
-                    return Decimal(balance_text.strip())
-                except InvalidOperation:
-                    return None
-
-            if self.process is not None and self.process.returncode is not None:
-                return None
-
-            if asyncio.get_running_loop().time() >= deadline:
-                return None
-
-            await asyncio.sleep(COMMAND_POLL_INTERVAL_SECONDS)
+            self.output_lines.append(line.decode("utf-8", errors="replace").rstrip())
 
     async def wait_until_ready(self) -> None:
-        if self.process is None:
-            raise RuntimeError("Node process is not running")
+        deadline = asyncio.get_running_loop().time() + NODE_READY_TIMEOUT_SECONDS
+        async with httpx.AsyncClient() as client:
+            while asyncio.get_running_loop().time() < deadline:
+                if self.process is not None and self.process.returncode is not None:
+                    raise HTTPException(status_code=500, detail="Node exited unexpectedly during startup.")
+                try:
+                    resp = await client.get(f"{self.api_base}/health", timeout=2.0)
+                    if resp.status_code == 200:
+                        return
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(0.5)
+        raise HTTPException(status_code=504, detail="Timed out waiting for node startup.")
 
-        try:
-            await asyncio.wait_for(self.ready_event.wait(), timeout=NODE_READY_TIMEOUT_SECONDS)
-        except TimeoutError as error:
-            raise HTTPException(
-                status_code=504,
-                detail="Timed out waiting for node startup.",
-            ) from error
+    async def sync(self) -> None:
+        deadline = asyncio.get_running_loop().time() + SYNC_MAX_WAIT_SECONDS
+        async with httpx.AsyncClient() as client:
+            try:
+                await client.post(f"{self.api_base}/control/sync", json={"fast": True}, timeout=5.0)
+            except httpx.HTTPError as error:
+                raise HTTPException(status_code=503, detail=f"Sync request failed: {error}")
+            while asyncio.get_running_loop().time() < deadline:
+                if self.process is not None and self.process.returncode is not None:
+                    raise HTTPException(status_code=500, detail="Node exited unexpectedly during sync.")
+                try:
+                    resp = await client.get(f"{self.api_base}/sync/status", timeout=5.0)
+                    if resp.status_code == 200 and resp.json().get("phase") == "ready":
+                        return
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(1.0)
+        raise HTTPException(status_code=504, detail="Timed out waiting for blockchain sync.")
 
-    async def send_command(self, command: str) -> None:
-        if self.process is None or self.process.stdin is None:
-            raise RuntimeError("Node process stdin is unavailable")
+    async def get_balance(self, address: str) -> Decimal:
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(f"{self.api_base}/balances", timeout=5.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        return Decimal(str(data.get(address, "0")))
+            except (httpx.HTTPError, InvalidOperation):
+                pass
+        return Decimal("0")
 
-        self.process.stdin.write(f"{command}\n".encode("utf-8"))
-        await self.process.stdin.drain()
-        self.output_lines.append(f"> {command}")
+    async def send_transaction(self, receiver: str, amount: str, fee: str) -> str:
+        safe_receiver = validate_unccoin_address(receiver, "Receiver address")
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(
+                    f"{self.api_base}/control/transactions",
+                    json={"receiver": safe_receiver, "amount": amount.strip(), "fee": fee.strip()},
+                    timeout=30.0,
+                )
+            except httpx.HTTPError as error:
+                raise HTTPException(status_code=503, detail=f"Transaction request failed: {error}")
+            if resp.status_code != 200:
+                body = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
+                raise HTTPException(status_code=400, detail=f"Transaction rejected: {body.get('detail', resp.text)}")
+            return str(resp.json().get("transaction_id", ""))
 
-    async def send_command_with_marker(self, command: str) -> int:
-        start_index = len(self.output_lines)
-        await self.send_command(command)
-        return start_index
-
-    async def sleep(self, seconds: int) -> None:
-        await asyncio.sleep(seconds)
+    def check_for_peer_rejection(self, since_index: int) -> None:
+        for line in reversed(list(self.output_lines)[since_index:]):
+            if "nonce does not match" in line or (
+                "Rejected transaction" in line and "Rejected local transaction" not in line
+            ):
+                raise HTTPException(status_code=409, detail=f"Transaction rejected by network: {line.strip()}")
 
     async def close(self) -> None:
         if self.process is None:
             return
-
         if self.process.returncode is None:
+            self.process.terminate()
             try:
-                await self.send_command("quit")
                 await asyncio.wait_for(self.process.wait(), timeout=10)
             except Exception:
-                self.process.terminate()
-                try:
-                    await asyncio.wait_for(self.process.wait(), timeout=5)
-                except Exception:
-                    self.process.kill()
-                    await self.process.wait()
-
-        if self.stream_task is not None:
-            await self.stream_task
+                self.process.kill()
+                await self.process.wait()
+        if self._stream_task is not None:
+            try:
+                await asyncio.wait_for(self._stream_task, timeout=5)
+            except Exception:
+                pass
 
 
 async def sync_local_exports() -> None:
@@ -1379,93 +1224,14 @@ async def send_unccoin_transaction(wallet_record: Dict[str, Any], receiver_addre
     )
 
 
-async def broadcast_tx_command(
-    runner: InteractiveNodeRunner,
-    receiver_address: str,
-    amount: str,
-    fee: str,
-) -> None:
-    safe_address = validate_unccoin_address(receiver_address, "Receiver address")
-    safe_amount = validate_node_command_param(amount, "Amount")
-    safe_fee = validate_node_command_param(fee, "Fee")
-    start_index = await runner.send_command_with_marker(f"tx {safe_address} {safe_amount} {safe_fee}")
-    tx_result = await runner.wait_for_output(
-        success_markers=["Broadcast transaction "],
-        failure_markers=["Invalid tx command:", "Rejected local transaction "],
-        timeout_seconds=max(TX_WAIT_SECONDS, 15),
-        start_index=start_index,
-    )
-    if tx_result == "Invalid tx command:":
-        output = runner.tail_output()
-        detail = output.rsplit("Invalid tx command:", maxsplit=1)[-1].strip()
-        raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
-    if tx_result == "Rejected local transaction ":
-        output = runner.tail_output()
-        detail = output.rsplit("Rejected local transaction ", maxsplit=1)[-1].strip()
-        raise HTTPException(status_code=400, detail=f"Transaction rejected: {detail}")
-
-    # Wait briefly for the peer to propagate a rejection (e.g. nonce mismatch).
-    # "Broadcast transaction" is emitted locally before the peer responds, so a
-    # rejection from the peer appears a moment later in the same output stream.
-    await asyncio.sleep(3)
-    post_lines = list(runner.output_lines)[start_index:]
-    for line in reversed(post_lines):
-        if "nonce does not match" in line or (
-            "Rejected transaction" in line and "Rejected local transaction" not in line
-        ):
-            raise HTTPException(status_code=409, detail=f"Transaction rejected by network: {line.strip()}")
-
-
-async def add_peer_command(runner: InteractiveNodeRunner, peer_address: str) -> None:
-    start_index = await runner.send_command_with_marker(f"add-peer {peer_address}")
-    add_peer_result = await runner.wait_for_output(
-        success_markers=[f"Connected to peer {peer_address}"],
-        failure_markers=["Invalid add-peer command:"],
-        timeout_seconds=10,
-        start_index=start_index,
-    )
-    if add_peer_result == "Invalid add-peer command:":
-        output = runner.tail_output()
-        detail = output.rsplit("Invalid add-peer command:", maxsplit=1)[-1].strip()
-        raise HTTPException(status_code=400, detail=f"Peer connection failed: {detail}")
-
-
-async def connect_to_any_configured_peer(runner: InteractiveNodeRunner) -> None:
-    if not DEFAULT_PEER_ADDRESSES:
-        return
-
-    failures: list[str] = []
-
-    for peer_address in DEFAULT_PEER_ADDRESSES:
-        try:
-            await add_peer_command(runner, peer_address)
-            return
-        except HTTPException as error:
-            failures.append(f"{peer_address}: {error.detail}")
-
-    raise HTTPException(
-        status_code=503,
-        detail=(
-            "Failed to connect to any configured UncCoin peer. "
-            f"Tried: {'; '.join(failures)}"
-        ),
-    )
-
-
 async def warm_wallet_node(wallet_record: Dict[str, Any]) -> None:
     wallet_address = str(wallet_record["wallet_address"]).strip()
     node_port = int(wallet_record["node_port"])
-    runner = InteractiveNodeRunner(str(wallet_record["internal_wallet_name"]).strip(), node_port)
+    runner = NodeApiRunner(str(wallet_record["internal_wallet_name"]).strip(), node_port)
     try:
         await runner.start()
         await runner.wait_until_ready()
-        await connect_to_any_configured_peer(runner)
-        await runner.send_command("sync")
-        await runner.wait_for_sync_settle(timeout_seconds=15)
-        await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
-        await runner.sleep(1)
-        await load_blockchain_once()
-        await seed_wallet_blockchain_state(wallet_address)
+        await runner.sync()
         wallet_last_warmed[wallet_address] = asyncio.get_running_loop().time()
         print(f"Warmup: synced wallet {wallet_address[:16]}...")
     except Exception as error:
@@ -1521,73 +1287,51 @@ async def send_unccoin_transaction_with_bonus(
     wallet_address = str(wallet_record["wallet_address"]).strip()
 
     async with node_command_lock:
-        await sync_local_exports()
+        await load_balances_once()
         await require_available_wallet_balance(wallet_address, required_total)
         await verify_wallet_record_identity(wallet_record)
-        await seed_wallet_blockchain_state(wallet_address)
-        node_port = int(wallet_record["node_port"])
-        runner = InteractiveNodeRunner(str(wallet_record["internal_wallet_name"]).strip(), node_port)
 
+        node_port = int(wallet_record["node_port"])
+        runner = NodeApiRunner(str(wallet_record["internal_wallet_name"]).strip(), node_port)
         try:
             await runner.start()
             await runner.wait_until_ready()
-            await connect_to_any_configured_peer(runner)
-            await runner.send_command("sync")
-            await runner.wait_for_sync_settle(timeout_seconds=15)
-            await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
-            await runner.sleep(1)
-            await load_blockchain_once()
-            # Re-seed from the synced chain so the wallet's nonce reflects the
-            # canonical chain state rather than the (possibly stale/forked) seed
-            # that was written before the node started.
-            await seed_wallet_blockchain_state(wallet_address)
+            await runner.sync()
             wallet_last_warmed[wallet_address] = asyncio.get_running_loop().time()
-            await require_available_wallet_balance(wallet_address, required_total)
-            sync_deadline = asyncio.get_running_loop().time() + max(SYNC_WAIT_SECONDS, SYNC_MAX_WAIT_SECONDS)
-            while True:
-                current_balance = await runner.query_wallet_balance()
-                if current_balance is not None and current_balance >= required_total:
-                    break
 
-                if asyncio.get_running_loop().time() >= sync_deadline:
-                    print(
-                        "Timed out waiting for balance sync.\n"
-                        f"Needed: {required_total}, current: {current_balance}\n"
-                        f"{runner.tail_output()}"
-                    )
-                    raise HTTPException(
-                        status_code=504,
-                        detail=(
-                            "Timed out waiting for the wallet balance to sync high enough.\n"
-                            f"Needed: {required_total}, "
-                            f"current: {current_balance if current_balance is not None else 'unknown'}"
-                        ),
-                    )
+            node_balance = await runner.get_balance(wallet_address)
+            if node_balance < required_total:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Insufficient balance after sync. Available: {node_balance}, required: {required_total}",
+                )
 
-                await runner.wait_for_sync_settle(timeout_seconds=15)
-                await asyncio.sleep(BALANCE_POLL_INTERVAL_SECONDS)
-
-            await broadcast_tx_command(runner, receiver_address, amount, fee)
+            pre_tx_index = len(runner.output_lines)
+            tx_id = await runner.send_transaction(receiver_address, amount, fee)
             if on_broadcast:
                 await on_broadcast()
+
+            # Brief wait for peer rejection propagation (e.g. nonce mismatch from a forked peer)
+            await asyncio.sleep(3)
+            runner.check_for_peer_rejection(pre_tx_index)
+
             if bonus_decimal > 0:
                 try:
-                    await broadcast_tx_command(runner, BONUS_RECEIVER_ADDRESS, str(bonus_decimal), "0")
+                    bonus_index = len(runner.output_lines)
+                    await runner.send_transaction(BONUS_RECEIVER_ADDRESS, str(bonus_decimal), "0")
+                    await asyncio.sleep(1)
+                    runner.check_for_peer_rejection(bonus_index)
                 except HTTPException as bonus_error:
-                    print(f"Bonus transaction failed after main tx succeeded (sender {wallet_address}): {bonus_error.detail}")
-            await runner.send_command(f"txtbalances {OUTPUT_BALANCES_PATH}")
-            await runner.send_command(f"txtblockchain {OUTPUT_BLOCKCHAIN_PATH}")
-            await runner.sleep(2)
+                    print(f"Bonus tx failed after main tx (sender {wallet_address}): {bonus_error.detail}")
+
+            await sync_local_exports()
+            return tx_id
         except HTTPException:
             raise
         except Exception as error:
             raise HTTPException(status_code=500, detail=f"Failed to send transaction: {error}") from error
         finally:
             await runner.close()
-
-        output = runner.tail_output()
-        await sync_local_exports()
-        return output
 
 
 @asynccontextmanager
@@ -1798,7 +1542,7 @@ async def wallet_send(
 ) -> Dict[str, Any]:
     wallet_record = await require_authenticated_browser_wallet(authorization)
     bonus_amount = await get_bonus_amount_setting()
-    command_output = await send_unccoin_transaction_with_bonus(
+    await send_unccoin_transaction_with_bonus(
         wallet_record=wallet_record,
         receiver_address=payload.receiver_address,
         amount=payload.amount,
@@ -1832,7 +1576,7 @@ async def wallet_send_stream(
 
     async def run() -> None:
         try:
-            command_output = await send_unccoin_transaction_with_bonus(
+            await send_unccoin_transaction_with_bonus(
                 wallet_record=wallet_record,
                 receiver_address=payload.receiver_address,
                 amount=payload.amount,
@@ -1921,14 +1665,13 @@ async def api_send_transaction(
     if not wallet_record:
         raise HTTPException(status_code=404, detail="Sender wallet is not managed by this backend")
 
-    command_output = await send_unccoin_transaction_with_bonus(
+    tx_id = await send_unccoin_transaction_with_bonus(
         wallet_record=wallet_record,
         receiver_address=payload.receiver_address,
         amount=payload.amount,
         fee="0",
         bonus_amount="0",
     )
-    broadcasts = extract_broadcast_transactions(command_output)
     wallet = await get_wallet_summary(
         sender_address,
         require_chain_presence=False,
@@ -1942,10 +1685,9 @@ async def api_send_transaction(
             "sender_address": sender_address,
             "receiver_address": payload.receiver_address.strip(),
             "amount": payload.amount.strip(),
-            "fee": payload.fee.strip(),
-            "broadcast": broadcasts[0] if broadcasts else None,
+            "fee": "0",
+            "transaction_id": tx_id,
         },
-        "broadcasts": broadcasts,
         "wallet": wallet,
     }
 
