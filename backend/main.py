@@ -51,6 +51,7 @@ def load_env_file(path: Path) -> None:
 load_env_file(ENV_FILE)
 
 UNCCOIN_REPO = (WEB_ROOT.parent / "UncCoin").resolve()
+UNCCOIN_RUN_SCRIPT = UNCCOIN_REPO / "scripts" / "run.sh"
 UNCCOIN_WALLETS_DIR = UNCCOIN_REPO / "state" / "wallets"
 BROWSER_WALLETS_FILE = BASE_DIR / "browser_wallets.json"
 APP_SETTINGS_FILE = BASE_DIR / "app_settings.json"
@@ -1094,21 +1095,14 @@ class NodeApiRunner:
         self._stream_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        cmd = [
-            _find_python_bin(), "-m", "node.cli",
-            "--host", "0.0.0.0",
-            "--wallet-name", self.wallet_name,
-            "--port", str(self.node_port),
-            "--no-interactive",
-            "--api-host", "127.0.0.1",
-            "--api-port", str(self.node_port + 10000),
-        ]
-        for peer in DEFAULT_PEER_ADDRESSES:
-            cmd += ["--peer", peer]
+        # Use run.sh so the correct Python/venv is found the same way as manual usage.
+        # stdin=PIPE keeps the interactive console alive (DEVNULL would cause immediate EOF→exit).
+        # run.sh auto-sets --api-port as node_port+10000 and passes extra args as --peer.
+        cmd = [str(UNCCOIN_RUN_SCRIPT), self.wallet_name, str(self.node_port)] + list(DEFAULT_PEER_ADDRESSES)
         self.process = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(UNCCOIN_REPO),
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -1196,12 +1190,19 @@ class NodeApiRunner:
         if self.process is None:
             return
         if self.process.returncode is None:
-            self.process.terminate()
             try:
+                if self.process.stdin:
+                    self.process.stdin.write(b"quit\n")
+                    await self.process.stdin.drain()
+                    self.process.stdin.close()
                 await asyncio.wait_for(self.process.wait(), timeout=10)
             except Exception:
-                self.process.kill()
-                await self.process.wait()
+                self.process.terminate()
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+                except Exception:
+                    self.process.kill()
+                    await self.process.wait()
         if self._stream_task is not None:
             try:
                 await asyncio.wait_for(self._stream_task, timeout=5)
