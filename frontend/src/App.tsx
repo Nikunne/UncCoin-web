@@ -173,52 +173,6 @@ type SupplyPoint = {
     timeLabel: string;
 };
 
-function buildSupplySeries(blocks: BlockchainBlock[]): SupplyPoint[] {
-    let totalSupply = 0;
-    const series: SupplyPoint[] = [];
-    let fallbackTimestampMs = 0;
-
-    for (const block of blocks) {
-        let blockTimestamp: string | null = null;
-
-        for (const transaction of block.transactions) {
-            if (!blockTimestamp) {
-                blockTimestamp = transaction.timestamp;
-            }
-
-            if (transaction.sender === "SYSTEM") {
-                totalSupply += parseAmount(transaction.amount);
-            }
-
-            if (transaction.receiver === "SYSTEM") {
-                totalSupply -= parseAmount(transaction.amount);
-            }
-        }
-
-        if (blockTimestamp) {
-            const parsed = new Date(blockTimestamp);
-            const parsedTime = parsed.getTime();
-            const hasValidTimestamp = !Number.isNaN(parsedTime);
-            const timestampMs = hasValidTimestamp ? parsedTime : fallbackTimestampMs + 1;
-            const dateLabel = hasValidTimestamp ? parsed.toLocaleDateString() : blockTimestamp;
-            const timeLabel = hasValidTimestamp
-                ? parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                : "";
-
-            series.push({
-                timestamp: blockTimestamp,
-                timestampMs,
-                totalSupply,
-                label: formatTimestamp(blockTimestamp),
-                dateLabel,
-                timeLabel,
-            });
-            fallbackTimestampMs = timestampMs;
-        }
-    }
-
-    return series;
-}
 
 function downsampleSupplySeries(series: SupplyPoint[], maxPoints: number): SupplyPoint[] {
     if (series.length <= maxPoints) {
