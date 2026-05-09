@@ -33,6 +33,18 @@ export type BlockchainResponse = {
     blocks: BlockchainBlock[];
 };
 
+export type SupplyHistoryPoint = {
+    timestamp: string;
+    supply: number;
+    block_id: number | null;
+};
+
+export type SupplyHistoryResponse = {
+    supply_series: SupplyHistoryPoint[];
+    total_height: number;
+    total_blocks_processed: number;
+};
+
 export async function getBlockchain(): Promise<BlockchainResponse> {
     const response = await fetch(`${API_BASE_URL}/blockchain`);
 
@@ -41,4 +53,14 @@ export async function getBlockchain(): Promise<BlockchainResponse> {
     }
 
     return (await response.json()) as BlockchainResponse;
+}
+
+export async function getSupplyHistory(maxPoints = 500): Promise<SupplyHistoryResponse> {
+    const response = await fetch(`${API_BASE_URL}/supply-history?max_points=${maxPoints}`);
+
+    if (!response.ok) {
+        throw new Error(`Failed to fetch supply history: ${response.status}`);
+    }
+
+    return (await response.json()) as SupplyHistoryResponse;
 }

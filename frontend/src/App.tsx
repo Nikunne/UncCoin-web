@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
-import { getBlockchain, type BlockchainBlock, type BlockchainResponse } from "./api/blockchain";
+import { getBlockchain, getSupplyHistory, type BlockchainBlock, type BlockchainResponse, type SupplyHistoryPoint } from "./api/blockchain";
 import {
     ApiError,
     createBrowserWallet,
@@ -1564,8 +1564,37 @@ function BonusDashboard({
     );
 }
 
+function buildSupplySeriesFromHistory(points: SupplyHistoryPoint[]): SupplyPoint[] {
+    const series: SupplyPoint[] = [];
+    let fallbackTimestampMs = 0;
+
+    for (const point of points) {
+        const parsed = new Date(point.timestamp);
+        const parsedTime = parsed.getTime();
+        const hasValidTimestamp = !Number.isNaN(parsedTime);
+        const timestampMs = hasValidTimestamp ? parsedTime : fallbackTimestampMs + 1;
+        const dateLabel = hasValidTimestamp ? parsed.toLocaleDateString() : point.timestamp;
+        const timeLabel = hasValidTimestamp
+            ? parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : "";
+
+        series.push({
+            timestamp: point.timestamp,
+            timestampMs,
+            totalSupply: point.supply,
+            label: formatTimestamp(point.timestamp),
+            dateLabel,
+            timeLabel,
+        });
+        fallbackTimestampMs = timestampMs;
+    }
+
+    return series;
+}
+
 function StatPage() {
-    const [blockchain, setBlockchain] = useState<BlockchainResponse | null>(null);
+    const [supplyHistory, setSupplyHistory] = useState<SupplyPoint[]>([]);
+    const [totalBlocksProcessed, setTotalBlocksProcessed] = useState(0);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [isMobileChart, setIsMobileChart] = useState(() =>
         typeof window !== "undefined" ? window.innerWidth <= MOBILE_BREAKPOINT_PX : false,
@@ -1576,9 +1605,13 @@ function StatPage() {
 
         const load = async () => {
             try {
-                const data = await getBlockchain();
+                const maxPoints = typeof window !== "undefined" && window.innerWidth <= MOBILE_BREAKPOINT_PX
+                    ? MOBILE_MAX_SUPPLY_CHART_POINTS
+                    : MAX_SUPPLY_CHART_POINTS;
+                const data = await getSupplyHistory(maxPoints);
                 if (active) {
-                    setBlockchain(data);
+                    setSupplyHistory(buildSupplySeriesFromHistory(data.supply_series));
+                    setTotalBlocksProcessed(data.total_blocks_processed);
                     setLastUpdated(new Date());
                 }
             } catch (error) {
@@ -1587,7 +1620,7 @@ function StatPage() {
         };
 
         load();
-        const fetchTimer = setInterval(load, 10_000);
+        const fetchTimer = setInterval(load, 60_000);
 
         return () => {
             active = false;
@@ -1608,8 +1641,7 @@ function StatPage() {
         };
     }, []);
 
-    const blocks = blockchain?.blocks ?? [];
-    const fullSupplySeries = buildSupplySeries(blocks);
+    const fullSupplySeries = supplyHistory;
     const chartWidth = isMobileChart ? MOBILE_CHART_WIDTH : CHART_WIDTH;
     const chartHeight = isMobileChart ? MOBILE_CHART_HEIGHT : CHART_HEIGHT;
     const chartPaddingLeft = isMobileChart ? MOBILE_CHART_PADDING_LEFT : CHART_PADDING_LEFT;
@@ -1699,7 +1731,7 @@ function StatPage() {
                         <span className="chain-stat-label">Chart Points</span>
                         <strong className="chain-stat-value">
                             {supplySeries.length}
-                            <span className="chain-stat-suffix"> / {fullSupplySeries.length}</span>
+                            <span className="chain-stat-suffix"> / {totalBlocksProcessed}</span>
                         </strong>
                     </article>
                     <article className="chain-stat-card">
@@ -1823,8 +1855,7 @@ function StatPage() {
                                 </svg>
                             </div>
                             <p className="stat-chart-note">
-                                Supply is calculated as cumulative SYSTEM issuance minus transfers back to SYSTEM.
-                                The chart samples older history to keep loading fast{isMobileChart ? " on mobile." : "."}
+                                Supply is calculated as cumulative SYSTEM issuance minus transfers back to SYSTEM. The chart samples the full chain history to keep loading fast.
                             </p>
                         </>
                     ) : (

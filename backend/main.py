@@ -1811,6 +1811,101 @@ async def get_wallet(wallet_address: str) -> Dict[str, Any]:
     return await get_wallet_summary(wallet_address)
 
 
+@app.get("/supply-history")
+async def get_supply_history(max_points: int = 500) -> Dict[str, Any]:
+    max_points = min(max(max_points, 10), 2000)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            head_resp = await client.get(f"{RIGGA_API_BASE}/chain/head", timeout=5.0)
+        if head_resp.status_code != 200:
+            raise HTTPException(status_code=502, detail="Failed to fetch chain head")
+        head = head_resp.json()
+        total_height = head.get("height", 0) if isinstance(head, dict) else 0
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch chain head: {error}")
+
+    all_blocks: list[Dict[str, Any]] = []
+    batch_size = 500
+    from_height = 0
+
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                resp = await client.get(
+                    f"{RIGGA_API_BASE}/chain/blocks",
+                    params={"from_height": from_height, "limit": batch_size},
+                    timeout=30.0,
+                )
+            except httpx.HTTPError as error:
+                raise HTTPException(status_code=502, detail=f"Failed to fetch blocks at height {from_height}: {error}")
+
+            if resp.status_code != 200:
+                break
+
+            data = resp.json()
+            if isinstance(data, dict):
+                blocks = data.get("blocks", [])
+            elif isinstance(data, list):
+                blocks = data
+            else:
+                blocks = []
+
+            if not isinstance(blocks, list) or not blocks:
+                break
+
+            all_blocks.extend(blocks)
+            from_height += len(blocks)
+
+            if len(blocks) < batch_size:
+                break
+
+    supply = 0.0
+    supply_series: list[Dict[str, Any]] = []
+
+    for block in all_blocks:
+        block_timestamp: str | None = None
+        for transaction in block.get("transactions", []):
+            if not block_timestamp:
+                ts = transaction.get("timestamp")
+                if isinstance(ts, str) and ts.strip():
+                    block_timestamp = ts.strip()
+
+            sender = str(transaction.get("sender", ""))
+            receiver = str(transaction.get("receiver", ""))
+            amount = parse_amount(transaction.get("amount", 0))
+
+            if sender == "SYSTEM":
+                supply += amount
+            if receiver == "SYSTEM":
+                supply -= amount
+
+        if block_timestamp:
+            supply_series.append({
+                "timestamp": block_timestamp,
+                "supply": supply,
+                "block_id": block.get("block_id"),
+            })
+
+    if len(supply_series) > max_points:
+        last_index = len(supply_series) - 1
+        sampled: list[Dict[str, Any]] = []
+        for i in range(max_points):
+            source_index = last_index if i == max_points - 1 else round((i / (max_points - 1)) * last_index)
+            point = supply_series[source_index]
+            if sampled and sampled[-1]["block_id"] == point["block_id"]:
+                sampled[-1] = point
+            else:
+                sampled.append(point)
+        supply_series = sampled
+
+    return {
+        "supply_series": supply_series,
+        "total_height": total_height,
+        "total_blocks_processed": len(all_blocks),
+    }
+
+
 @app.get("/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
