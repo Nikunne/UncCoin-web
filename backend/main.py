@@ -109,7 +109,8 @@ blockchain: Dict[str, Any] = {}
 blockchain_lock = asyncio.Lock()
 supply_history_cache: Dict[str, Any] = {}
 supply_history_cache_lock = asyncio.Lock()
-SUPPLY_HISTORY_CACHE_TTL_SECONDS = 60
+SUPPLY_HISTORY_CACHE_TTL_SECONDS = 600
+SUPPLY_HISTORY_REFRESH_INTERVAL_SECONDS = 120
 browser_wallets: Dict[str, Dict[str, Any]] = {}
 browser_wallets_lock = asyncio.Lock()
 wallet_sessions: Dict[str, Dict[str, str]] = {}
@@ -121,6 +122,7 @@ login_attempts_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
 api_sweep_task: asyncio.Task | None = None
 wallet_warmup_task: asyncio.Task | None = None
+supply_history_refresh_task: asyncio.Task | None = None
 wallet_last_warmed: Dict[str, float] = {}
 WALLET_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
 UNCCOIN_ADDRESS_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -1378,17 +1380,34 @@ async def send_unccoin_transaction_with_bonus(
             await runner.close()
 
 
+async def supply_history_refresh_loop() -> None:
+    while True:
+        await asyncio.sleep(SUPPLY_HISTORY_REFRESH_INTERVAL_SECONDS)
+        for max_points in (180, 60):
+            try:
+                await _compute_supply_history_into_cache(max_points)
+            except Exception as error:
+                print(f"Supply history background refresh failed for max_points={max_points}: {error}")
+
+
+async def _compute_supply_history_into_cache(max_points: int) -> None:
+    import time
+    result = await _compute_supply_history(max_points)
+    async with supply_history_cache_lock:
+        supply_history_cache[str(max_points)] = {"data": result, "cached_at": time.monotonic()}
+
+
 async def _prewarm_supply_history_cache() -> None:
     for max_points in (180, 60):
         try:
-            await get_supply_history(max_points)
+            await _compute_supply_history_into_cache(max_points)
         except Exception as error:
             print(f"Supply history prewarm failed for max_points={max_points}: {error}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global refresh_task, api_sweep_task
+    global refresh_task, api_sweep_task, supply_history_refresh_task
 
     async with browser_wallets_lock:
         browser_wallets.clear()
@@ -1435,6 +1454,7 @@ async def lifespan(app: FastAPI):
     await load_blockchain_once()
     asyncio.create_task(_prewarm_supply_history_cache())
     refresh_task = asyncio.create_task(refresh_loop())
+    supply_history_refresh_task = asyncio.create_task(supply_history_refresh_loop())
     if API_SWEEP_ENABLED and BETTING_SHARK_ADDRESS:
         api_sweep_task = asyncio.create_task(api_sweep_loop())
     if WALLET_WARMUP_ENABLED:
@@ -1447,6 +1467,12 @@ async def lifespan(app: FastAPI):
             refresh_task.cancel()
             try:
                 await refresh_task
+            except asyncio.CancelledError:
+                pass
+        if supply_history_refresh_task:
+            supply_history_refresh_task.cancel()
+            try:
+                await supply_history_refresh_task
             except asyncio.CancelledError:
                 pass
         if api_sweep_task:
