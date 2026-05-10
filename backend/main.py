@@ -83,7 +83,11 @@ DEFAULT_BONUS_AMOUNT = "1"
 RECENT_WALLET_ACTIVITY_LIMIT = 40
 EXTERNAL_API_TOKEN = os.getenv("UNC_WEB_API_TOKEN", "").strip()
 BETTING_SHARK_ADDRESS = os.getenv("UNC_BETTING_SHARK_ADDRESS", "").strip()
-ADMIN_WALLET_ADDRESS = os.getenv("UNC_ADMIN_WALLET_ADDRESS", "").strip()
+ADMIN_WALLET_ADDRESSES = {
+    addr.strip()
+    for addr in os.getenv("UNC_ADMIN_WALLET_ADDRESS", "").split(",")
+    if addr.strip()
+}
 SESSION_TTL_SECONDS = int(os.getenv("UNC_SESSION_TTL_SECONDS", str(24 * 3600)))
 LOGIN_RATE_LIMIT_MAX = int(os.getenv("UNC_LOGIN_RATE_LIMIT_MAX", "10"))
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("UNC_LOGIN_RATE_LIMIT_WINDOW_SECONDS", "60"))
@@ -1374,6 +1378,14 @@ async def send_unccoin_transaction_with_bonus(
             await runner.close()
 
 
+async def _prewarm_supply_history_cache() -> None:
+    for max_points in (180, 60):
+        try:
+            await get_supply_history(max_points)
+        except Exception as error:
+            print(f"Supply history prewarm failed for max_points={max_points}: {error}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global refresh_task, api_sweep_task
@@ -1421,6 +1433,7 @@ async def lifespan(app: FastAPI):
 
     await load_balances_once()
     await load_blockchain_once()
+    asyncio.create_task(_prewarm_supply_history_cache())
     refresh_task = asyncio.create_task(refresh_loop())
     if API_SWEEP_ENABLED and BETTING_SHARK_ADDRESS:
         api_sweep_task = asyncio.create_task(api_sweep_loop())
@@ -1807,7 +1820,7 @@ async def update_bonus_amount(
     authorization: str | None = Header(default=None),
 ) -> Dict[str, Any]:
     wallet_record = await require_authenticated_browser_wallet(authorization)
-    if not ADMIN_WALLET_ADDRESS or wallet_record.get("wallet_address", "") != ADMIN_WALLET_ADDRESS:
+    if not ADMIN_WALLET_ADDRESSES or wallet_record.get("wallet_address", "") not in ADMIN_WALLET_ADDRESSES:
         raise HTTPException(status_code=403, detail="Not authorized to update bonus amount")
     bonus_amount = await set_bonus_amount_setting(payload.bonus_amount)
     return {
