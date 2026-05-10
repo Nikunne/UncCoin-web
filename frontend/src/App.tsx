@@ -2149,13 +2149,13 @@ function BlockchainPage() {
                                 <div>
                                     <span className="hash-label">Hash</span>
                                     <code className="hash-value" title={block.block_hash}>
-                                        {truncateHash(block.block_hash)}
+                                        {block.block_hash}
                                     </code>
                                 </div>
                                 <div>
                                     <span className="hash-label">Prev</span>
                                     <code className="hash-value" title={block.previous_hash}>
-                                        {truncateHash(block.previous_hash)}
+                                        {block.previous_hash}
                                     </code>
                                 </div>
                             </div>

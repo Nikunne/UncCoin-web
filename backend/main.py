@@ -103,6 +103,9 @@ balances: Dict[str, float] = {}
 balances_lock = asyncio.Lock()
 blockchain: Dict[str, Any] = {}
 blockchain_lock = asyncio.Lock()
+supply_history_cache: Dict[str, Any] = {}
+supply_history_cache_lock = asyncio.Lock()
+SUPPLY_HISTORY_CACHE_TTL_SECONDS = 60
 browser_wallets: Dict[str, Dict[str, Any]] = {}
 browser_wallets_lock = asyncio.Lock()
 wallet_sessions: Dict[str, Dict[str, str]] = {}
@@ -1818,10 +1821,7 @@ async def get_wallet(wallet_address: str) -> Dict[str, Any]:
     return await get_wallet_summary(wallet_address)
 
 
-@app.get("/supply-history")
-async def get_supply_history(max_points: int = 500) -> Dict[str, Any]:
-    max_points = min(max(max_points, 10), 2000)
-
+async def _compute_supply_history(max_points: int) -> Dict[str, Any]:
     try:
         async with httpx.AsyncClient() as client:
             head_resp = await client.get(f"{RIGGA_API_BASE}/chain/head", timeout=5.0)
@@ -1894,6 +1894,12 @@ async def get_supply_history(max_points: int = 500) -> Dict[str, Any]:
                 "block_id": block.get("block_id"),
             })
 
+    full_result = {
+        "supply_series": supply_series,
+        "total_height": total_height,
+        "total_blocks_processed": len(all_blocks),
+    }
+
     if len(supply_series) > max_points:
         last_index = len(supply_series) - 1
         sampled: list[Dict[str, Any]] = []
@@ -1904,13 +1910,28 @@ async def get_supply_history(max_points: int = 500) -> Dict[str, Any]:
                 sampled[-1] = point
             else:
                 sampled.append(point)
-        supply_series = sampled
+        full_result["supply_series"] = sampled
 
-    return {
-        "supply_series": supply_series,
-        "total_height": total_height,
-        "total_blocks_processed": len(all_blocks),
-    }
+    return full_result
+
+
+@app.get("/supply-history")
+async def get_supply_history(max_points: int = 500) -> Dict[str, Any]:
+    max_points = min(max(max_points, 10), 2000)
+    import time
+
+    cache_key = str(max_points)
+    async with supply_history_cache_lock:
+        cached = supply_history_cache.get(cache_key)
+        if cached and time.monotonic() - cached["cached_at"] < SUPPLY_HISTORY_CACHE_TTL_SECONDS:
+            return cached["data"]
+
+    result = await _compute_supply_history(max_points)
+
+    async with supply_history_cache_lock:
+        supply_history_cache[cache_key] = {"data": result, "cached_at": time.monotonic()}
+
+    return result
 
 
 @app.get("/health")
