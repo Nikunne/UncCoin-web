@@ -64,13 +64,6 @@ function formatTimestamp(timestamp: string): string {
     return parsed.toLocaleString();
 }
 
-function truncateHash(hash: string): string {
-    if (hash.length <= 20) {
-        return hash;
-    }
-
-    return `${hash.slice(0, 10)}...${hash.slice(-10)}`;
-}
 
 function parseAmount(value: string): number {
     const parsed = Number.parseFloat(value);
