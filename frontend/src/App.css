@@ -1780,7 +1780,7 @@ body::-webkit-scrollbar-thumb {
   }
 
   .stat-chart {
-    min-width: 620px;
+    min-width: 0;
   }
 
   .stat-label {

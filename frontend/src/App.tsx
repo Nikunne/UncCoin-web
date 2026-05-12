@@ -1543,6 +1543,7 @@ function StatPage() {
     const [supplyHistory, setSupplyHistory] = useState<SupplyPoint[]>([]);
     const [totalBlocksProcessed, setTotalBlocksProcessed] = useState(0);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [currentSupply, setCurrentSupply] = useState<number | null>(null);
     const [isMobileChart, setIsMobileChart] = useState(() =>
         typeof window !== "undefined" ? window.innerWidth <= MOBILE_BREAKPOINT_PX : false,
     );
@@ -1555,10 +1556,14 @@ function StatPage() {
                 const maxPoints = typeof window !== "undefined" && window.innerWidth <= MOBILE_BREAKPOINT_PX
                     ? MOBILE_MAX_SUPPLY_CHART_POINTS
                     : MAX_SUPPLY_CHART_POINTS;
-                const data = await getSupplyHistory(maxPoints);
+                const [data, balances] = await Promise.all([
+                    getSupplyHistory(maxPoints),
+                    getBalances(),
+                ]);
                 if (active) {
                     setSupplyHistory(buildSupplySeriesFromHistory(data.supply_series));
                     setTotalBlocksProcessed(data.total_blocks_processed);
+                    setCurrentSupply(balances.reduce((sum, [, amount]) => sum + amount, 0));
                     setLastUpdated(new Date());
                 }
             } catch (error) {
@@ -1672,7 +1677,7 @@ function StatPage() {
                 <div className="chain-stats">
                     <article className="chain-stat-card">
                         <span className="chain-stat-label">Current Supply</span>
-                        <strong className="chain-stat-value">{latestPoint?.totalSupply ?? 0}</strong>
+                        <strong className="chain-stat-value">{currentSupply ?? 0}</strong>
                     </article>
                     <article className="chain-stat-card">
                         <span className="chain-stat-label">Chart Points</span>
