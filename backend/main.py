@@ -70,6 +70,14 @@ DEFAULT_PEER_ADDRESSES = tuple(
 )
 RIGGA_NODE_P2P_PORT = int(os.getenv("UNC_RIGGA_PORT", "4040"))
 RIGGA_API_BASE = f"http://127.0.0.1:{RIGGA_NODE_P2P_PORT + 10000}/api/v1"
+RIGGA_NODE_WALLET_NAME = os.getenv("UNC_RIGGA_WALLET_NAME", "riggaagent")
+RIGGA_NODE_PEER_ADDRESSES = tuple(
+    peer.strip()
+    for peer in os.getenv("UNC_RIGGA_PEER_ADDRESSES", "100.119.242.7:6000").split(",")
+    if peer.strip()
+)
+RIGGA_MANAGED = os.getenv("UNC_RIGGA_MANAGED", "true").strip().lower() in {"1", "true", "yes", "on"}
+RIGGA_RESTART_DELAY_SECONDS = int(os.getenv("UNC_RIGGA_RESTART_DELAY_SECONDS", "5"))
 PASSWORD_ITERATIONS = 240_000
 
 
@@ -123,6 +131,7 @@ refresh_task: asyncio.Task | None = None
 api_sweep_task: asyncio.Task | None = None
 wallet_warmup_task: asyncio.Task | None = None
 supply_history_refresh_task: asyncio.Task | None = None
+rigga_node_task: asyncio.Task | None = None
 wallet_last_warmed: Dict[str, float] = {}
 WALLET_NAME_PATTERN = re.compile(r"[^a-z0-9-]+")
 UNCCOIN_ADDRESS_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -1405,9 +1414,54 @@ async def _prewarm_supply_history_cache() -> None:
             print(f"Supply history prewarm failed for max_points={max_points}: {error}")
 
 
+async def rigga_node_manager_loop() -> None:
+    peer_flags: list[str] = []
+    for peer in RIGGA_NODE_PEER_ADDRESSES:
+        peer_flags += ["--peer", peer]
+
+    cmd = [
+        _find_python_bin(), "-m", "node.cli",
+        "--host", "0.0.0.0",
+        "--wallet-name", RIGGA_NODE_WALLET_NAME,
+        "--port", str(RIGGA_NODE_P2P_PORT),
+        *peer_flags,
+        "--no-interactive",
+        "--api-host", "127.0.0.1",
+        "--api-port", str(RIGGA_NODE_P2P_PORT + 10000),
+    ]
+
+    while True:
+        process: asyncio.subprocess.Process | None = None
+        try:
+            print(f"[rigga] starting node on port {RIGGA_NODE_P2P_PORT}, API on {RIGGA_NODE_P2P_PORT + 10000}")
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(UNCCOIN_REPO),
+                stdin=asyncio.subprocess.PIPE,
+            )
+            returncode = await process.wait()
+            print(f"[rigga] node exited with code {returncode}, restarting in {RIGGA_RESTART_DELAY_SECONDS}s")
+        except asyncio.CancelledError:
+            if process is not None and process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=10)
+                except Exception:
+                    process.kill()
+                    await process.wait()
+            raise
+        except Exception as error:
+            print(f"[rigga] node manager error: {error}")
+
+        try:
+            await asyncio.sleep(RIGGA_RESTART_DELAY_SECONDS)
+        except asyncio.CancelledError:
+            raise
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global refresh_task, api_sweep_task, supply_history_refresh_task
+    global refresh_task, api_sweep_task, supply_history_refresh_task, rigga_node_task
 
     async with browser_wallets_lock:
         browser_wallets.clear()
@@ -1450,6 +1504,9 @@ async def lifespan(app: FastAPI):
         app_settings.clear()
         app_settings.update(load_app_settings_file())
 
+    if RIGGA_MANAGED:
+        rigga_node_task = asyncio.create_task(rigga_node_manager_loop())
+
     await load_balances_once()
     await load_blockchain_once()
     asyncio.create_task(_prewarm_supply_history_cache())
@@ -1463,6 +1520,12 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if rigga_node_task:
+            rigga_node_task.cancel()
+            try:
+                await rigga_node_task
+            except asyncio.CancelledError:
+                pass
         if refresh_task:
             refresh_task.cancel()
             try:
