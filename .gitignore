@@ -2,4 +2,6 @@
 .env
 backend/.env
 /prod
-/.idea
+.idea
+__pycache__
+*.pyc
