@@ -55,7 +55,8 @@ UNCCOIN_RUN_SCRIPT = UNCCOIN_REPO / "scripts" / "run.sh"
 UNCCOIN_WALLETS_DIR = UNCCOIN_REPO / "state" / "wallets"
 BROWSER_WALLETS_FILE = BASE_DIR / "browser_wallets.json"
 APP_SETTINGS_FILE = BASE_DIR / "app_settings.json"
-REFRESH_SECONDS = 10
+BLOCKCHAIN_REFRESH_SECONDS = int(os.getenv("UNC_BLOCKCHAIN_REFRESH_SECONDS", "2"))
+BALANCES_REFRESH_SECONDS = int(os.getenv("UNC_BALANCES_REFRESH_SECONDS", "10"))
 NODE_PORT_START = int(os.getenv("UNC_NODE_PORT_START", "8300"))
 NODE_PORT_END = int(os.getenv("UNC_NODE_PORT_END", "8500"))
 NODE_READY_TIMEOUT_SECONDS = int(os.getenv("UNC_NODE_READY_TIMEOUT_SECONDS", "45"))
@@ -119,6 +120,10 @@ supply_history_cache: Dict[str, Any] = {}
 supply_history_cache_lock = asyncio.Lock()
 SUPPLY_HISTORY_CACHE_TTL_SECONDS = 600
 SUPPLY_HISTORY_REFRESH_INTERVAL_SECONDS = 120
+all_blocks_cache: Dict[str, Any] = {}
+all_blocks_cache_lock = asyncio.Lock()
+ALL_BLOCKS_CACHE_TTL_SECONDS = 60
+blockchain_tip_height: int = -1
 browser_wallets: Dict[str, Dict[str, Any]] = {}
 browser_wallets_lock = asyncio.Lock()
 wallet_sessions: Dict[str, Dict[str, str]] = {}
@@ -512,6 +517,49 @@ async def get_wallet_summary(
     return build_wallet_stats(wallet_address, balance or 0.0, chain_data, activity_limit=activity_limit)
 
 
+async def fetch_all_blocks_cached() -> list[Dict[str, Any]]:
+    import time
+    async with all_blocks_cache_lock:
+        cached = all_blocks_cache.get("blocks")
+        if cached and time.monotonic() - cached["cached_at"] < ALL_BLOCKS_CACHE_TTL_SECONDS:
+            return cached["data"]
+
+    all_blocks: list[Dict[str, Any]] = []
+    batch_size = 500
+    from_height = 0
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                resp = await client.get(
+                    f"{RIGGA_API_BASE}/chain/blocks",
+                    params={"from_height": from_height, "limit": batch_size},
+                    timeout=30.0,
+                )
+            except httpx.HTTPError:
+                break
+            if resp.status_code != 200:
+                break
+            data = resp.json()
+            blocks = data.get("blocks", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            if not isinstance(blocks, list) or not blocks:
+                break
+            all_blocks.extend(blocks)
+            from_height += len(blocks)
+            if len(blocks) < batch_size:
+                break
+
+    async with all_blocks_cache_lock:
+        all_blocks_cache["blocks"] = {"data": all_blocks, "cached_at": time.monotonic()}
+
+    return all_blocks
+
+
+async def get_full_wallet_summary(wallet_address: str) -> Dict[str, Any]:
+    all_blocks = await fetch_all_blocks_cached()
+    balance = await get_wallet_balance(wallet_address)
+    return build_wallet_stats(wallet_address, balance or 0.0, {"blocks": all_blocks})
+
+
 async def get_bonus_amount_setting() -> str:
     async with app_settings_lock:
         return str(app_settings.get("bonus_amount", DEFAULT_BONUS_AMOUNT))
@@ -725,11 +773,98 @@ async def load_blockchain_once() -> None:
 
 
 
+async def load_blockchain_incremental() -> None:
+    """Fetch only blocks newer than the last known tip; falls back to full load on first call."""
+    global blockchain_tip_height
+    try:
+        async with httpx.AsyncClient() as client:
+            head_resp = await client.get(f"{RIGGA_API_BASE}/chain/head", timeout=5.0)
+        if head_resp.status_code != 200:
+            return
+        head_data = head_resp.json()
+        if not isinstance(head_data, dict):
+            return
+        current_tip = head_data.get("height")
+        if not isinstance(current_tip, int):
+            return
+
+        if blockchain_tip_height < 0:
+            # First call: do a full load to populate the cache
+            await load_blockchain_once()
+            blockchain_tip_height = current_tip
+            return
+
+        if current_tip <= blockchain_tip_height:
+            # Also refresh pending transactions even when no new blocks
+            try:
+                async with httpx.AsyncClient() as client:
+                    pending_resp = await client.get(f"{RIGGA_API_BASE}/transactions/pending", timeout=5.0)
+                if pending_resp.status_code == 200:
+                    pending_data = pending_resp.json()
+                    pending = pending_data.get("transactions", []) if isinstance(pending_data, dict) else pending_data
+                    async with blockchain_lock:
+                        blockchain["pending_transactions"] = pending if isinstance(pending, list) else []
+            except Exception:
+                pass
+            return
+
+        # Fetch only the new blocks since last tip
+        from_height = blockchain_tip_height + 1
+        limit = min(current_tip - blockchain_tip_height, 500)
+
+        async with httpx.AsyncClient() as client:
+            new_blocks_resp, pending_resp = await asyncio.gather(
+                client.get(
+                    f"{RIGGA_API_BASE}/chain/blocks",
+                    params={"from_height": from_height, "limit": limit},
+                    timeout=10.0,
+                ),
+                client.get(f"{RIGGA_API_BASE}/transactions/pending", timeout=5.0),
+                return_exceptions=True,
+            )
+
+        new_blocks: list = []
+        if isinstance(new_blocks_resp, httpx.Response) and new_blocks_resp.status_code == 200:
+            data = new_blocks_resp.json()
+            if isinstance(data, dict):
+                new_blocks = data.get("blocks", [])
+            elif isinstance(data, list):
+                new_blocks = data
+
+        if new_blocks:
+            async with blockchain_lock:
+                existing = blockchain.get("blocks", [])
+                combined = existing + new_blocks
+                # Keep at most 1000 most recent blocks to bound memory
+                if len(combined) > 1000:
+                    combined = combined[-1000:]
+                blockchain["blocks"] = combined
+
+            # Invalidate the all-blocks cache so wallet pages re-fetch
+            async with all_blocks_cache_lock:
+                all_blocks_cache.pop("blocks", None)
+
+        if isinstance(pending_resp, httpx.Response) and pending_resp.status_code == 200:
+            pending_data = pending_resp.json()
+            pending = pending_data.get("transactions", []) if isinstance(pending_data, dict) else pending_data
+            async with blockchain_lock:
+                blockchain["pending_transactions"] = pending if isinstance(pending, list) else []
+
+        blockchain_tip_height = current_tip
+
+    except Exception as error:
+        print(f"Error in incremental blockchain load: {error}")
+
+
 async def refresh_loop() -> None:
+    balances_last_at = 0.0
     while True:
-        await load_balances_once()
-        await load_blockchain_once()
-        await asyncio.sleep(REFRESH_SECONDS)
+        now = asyncio.get_running_loop().time()
+        await load_blockchain_incremental()
+        if now - balances_last_at >= BALANCES_REFRESH_SECONDS:
+            await load_balances_once()
+            balances_last_at = asyncio.get_running_loop().time()
+        await asyncio.sleep(BLOCKCHAIN_REFRESH_SECONDS)
 
 
 async def sweep_api_deposit_wallets_once() -> None:
@@ -1920,7 +2055,19 @@ async def update_bonus_amount(
 
 @app.get("/wallets/{wallet_address}")
 async def get_wallet(wallet_address: str) -> Dict[str, Any]:
-    return await get_wallet_summary(wallet_address, require_chain_presence=False)
+    return await get_full_wallet_summary(wallet_address)
+
+
+@app.get("/blocks/{block_id}")
+async def get_block(block_id: int) -> Dict[str, Any]:
+    all_blocks = await fetch_all_blocks_cached()
+    block = next((b for b in all_blocks if b.get("block_id") == block_id), None)
+    if block is None:
+        raise HTTPException(status_code=404, detail=f"Block {block_id} not found")
+    total = len(all_blocks)
+    prev_id = block_id - 1 if block_id > 0 else None
+    next_id = block_id + 1 if any(b.get("block_id") == block_id + 1 for b in all_blocks) else None
+    return {"block": block, "prev_block_id": prev_id, "next_block_id": next_id, "total_blocks": total}
 
 
 async def _compute_supply_history(max_points: int) -> Dict[str, Any]:

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
-import { getBlockchain, getSupplyHistory, type BlockchainBlock, type BlockchainResponse, type SupplyHistoryPoint } from "./api/blockchain";
+import { getBlock, getBlockchain, getSupplyHistory, type BlockDetailResponse, type BlockchainBlock, type BlockchainResponse, type SupplyHistoryPoint } from "./api/blockchain";
 import {
     ApiError,
     createBrowserWallet,
@@ -609,15 +609,11 @@ function HomePage() {
         };
 
         load();
-        const fetchTimer = setInterval(load, 60_000);
-        const reloadTimer = setInterval(() => {
-            window.location.reload();
-        }, 60_000);
+        const fetchTimer = setInterval(load, 10_000);
 
         return () => {
             active = false;
             clearInterval(fetchTimer);
-            clearInterval(reloadTimer);
         };
     }, []);
 
@@ -1841,7 +1837,7 @@ function BlockchainPage() {
         };
 
         load();
-        const fetchTimer = setInterval(load, 10_000);
+        const fetchTimer = setInterval(load, 2_000);
 
         return () => {
             active = false;
@@ -2133,7 +2129,9 @@ function BlockchainPage() {
                         <article key={block.block_id} className="block-card block-card-compact">
                             <div className="block-card-header">
                                 <div>
-                                    <p className="block-id">Block #{block.block_id}</p>
+                                    <Link className="block-id block-id-link" to={`/blocks/${block.block_id}`}>
+                                        Block #{block.block_id}
+                                    </Link>
                                     <p className="block-description">{block.description || "No description"}</p>
                                 </div>
                                 <div className="block-card-meta">
@@ -2422,6 +2420,14 @@ function WalletPage() {
                                             {activity.timestamp ? formatTimestamp(activity.timestamp) : "No timestamp"}
                                         </span>
                                     </div>
+                                    {activity.block_id !== null ? (
+                                        <div>
+                                            <span className="hash-label">Block</span>
+                                            <Link className="transaction-block-link" to={`/blocks/${activity.block_id}`}>
+                                                #{activity.block_id}
+                                            </Link>
+                                        </div>
+                                    ) : null}
                                 </div>
                                 );
                             })
@@ -2433,6 +2439,188 @@ function WalletPage() {
                         ) : null}
                     </div>
                 </article>
+            </section>
+        </PageScaffold>
+    );
+}
+
+function BlockPage() {
+    const { blockId } = useParams<{ blockId: string }>();
+    const navigate = useNavigate();
+    const [blockDetail, setBlockDetail] = useState<BlockDetailResponse | null>(null);
+    const [chainData, setChainData] = useState<BlockchainResponse | null>(null);
+    const [errorMessage, setErrorMessage] = useState("");
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+    const parsedBlockId = blockId !== undefined ? Number(blockId) : NaN;
+
+    useEffect(() => {
+        if (Number.isNaN(parsedBlockId)) return;
+
+        let active = true;
+
+        const load = async () => {
+            try {
+                const [detail, chain] = await Promise.all([
+                    getBlock(parsedBlockId),
+                    getBlockchain(),
+                ]);
+                if (active) {
+                    setBlockDetail(detail);
+                    setChainData(chain);
+                    setLastUpdated(new Date());
+                    setErrorMessage("");
+                }
+            } catch (error) {
+                if (active) {
+                    setErrorMessage(error instanceof Error ? error.message : "Failed to load block");
+                }
+            }
+        };
+
+        void load();
+
+        return () => { active = false; };
+    }, [parsedBlockId]);
+
+    const block = blockDetail?.block;
+
+    return (
+        <PageScaffold>
+            <PageNav items={buildPrimaryNavItems("blockchain")} />
+            <header className="masthead masthead-left">
+                <p className="masthead-kicker">
+                    <Link className="wallet-back-link" to="/blockchain">← Back to blockchain</Link>
+                </p>
+                <h1 className="balances-title">Block #{parsedBlockId}</h1>
+                {block?.description ? (
+                    <p className="masthead-subtitle">Mined by {getWalletDisplayName(block.description, chainData)}</p>
+                ) : null}
+            </header>
+
+            <section className="balances-shell" aria-label="Block details">
+                <div className="balances-meta">
+                    <span className="balances-section-title">Block Overview</span>
+                    <p className="last-updated">
+                        {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : "loading..."}
+                    </p>
+                </div>
+
+                {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
+
+                <div className="block-page-nav">
+                    {blockDetail?.prev_block_id !== null && blockDetail?.prev_block_id !== undefined ? (
+                        <button
+                            className="site-nav-link investment-button"
+                            type="button"
+                            onClick={() => navigate(`/blocks/${blockDetail.prev_block_id}`)}
+                        >
+                            ← Block #{blockDetail.prev_block_id}
+                        </button>
+                    ) : <span />}
+                    {blockDetail?.next_block_id !== null && blockDetail?.next_block_id !== undefined ? (
+                        <button
+                            className="site-nav-link investment-button"
+                            type="button"
+                            onClick={() => navigate(`/blocks/${blockDetail.next_block_id}`)}
+                        >
+                            Block #{blockDetail.next_block_id} →
+                        </button>
+                    ) : <span />}
+                </div>
+
+                {block ? (
+                    <>
+                        <div className="chain-stats">
+                            <article className="chain-stat-card">
+                                <span className="chain-stat-label">Block ID</span>
+                                <strong className="chain-stat-value">{block.block_id}</strong>
+                            </article>
+                            <article className="chain-stat-card">
+                                <span className="chain-stat-label">Transactions</span>
+                                <strong className="chain-stat-value">{block.transactions.length}</strong>
+                            </article>
+                            <article className="chain-stat-card">
+                                <span className="chain-stat-label">Nonce</span>
+                                <strong className="chain-stat-value">{block.nonce}</strong>
+                            </article>
+                        </div>
+
+                        <div className="chain-wallet-card">
+                            <div className="hash-grid hash-grid-compact">
+                                <div>
+                                    <span className="hash-label">Hash</span>
+                                    <code className="hash-value" title={block.block_hash}>{block.block_hash}</code>
+                                </div>
+                                <div>
+                                    <span className="hash-label">Previous</span>
+                                    <code className="hash-value" title={block.previous_hash}>{block.previous_hash}</code>
+                                </div>
+                            </div>
+                        </div>
+
+                        <article className="chain-wallet-card wallet-history-card">
+                            <span className="chain-stat-label">Transactions</span>
+                            <div className="transaction-list">
+                                {block.transactions.length === 0 ? (
+                                    <p className="empty-state">No transactions in this block.</p>
+                                ) : (
+                                    block.transactions.map((tx, index) => (
+                                        <div
+                                            key={`${block.block_id}-${tx.timestamp}-${index}`}
+                                            className="transaction-row transaction-row-compact"
+                                        >
+                                            <div className="transaction-route">
+                                                <span className="hash-label">Route</span>
+                                                <div className="transaction-route-values">
+                                                    {tx.sender === "SYSTEM" ? (
+                                                        <code className="hash-value">{tx.sender}</code>
+                                                    ) : (
+                                                        <Link
+                                                            className={getWalletAddressClassName("hash-value hash-value-link", tx.sender)}
+                                                            to={`/wallets/${encodeURIComponent(tx.sender)}`}
+                                                            title={tx.sender}
+                                                        >
+                                                            {getWalletDisplayName(tx.sender, chainData)}
+                                                        </Link>
+                                                    )}
+                                                    <span className="transaction-route-arrow" aria-hidden="true">→</span>
+                                                    {tx.receiver === "SYSTEM" ? (
+                                                        <code className="hash-value">{tx.receiver}</code>
+                                                    ) : (
+                                                        <Link
+                                                            className={getWalletAddressClassName("hash-value hash-value-link", tx.receiver)}
+                                                            to={`/wallets/${encodeURIComponent(tx.receiver)}`}
+                                                            title={tx.receiver}
+                                                        >
+                                                            {getWalletDisplayName(tx.receiver, chainData)}
+                                                        </Link>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="transaction-metric">
+                                                <span className="hash-label">Amount</span>
+                                                <span className="transaction-amount">{tx.amount}</span>
+                                            </div>
+                                            <div className="transaction-metric">
+                                                <span className="hash-label">Fee</span>
+                                                <span className="transaction-fee">
+                                                    {tx.sender !== "SYSTEM" && parseAmount(tx.fee) > 0 ? tx.fee : ""}
+                                                </span>
+                                            </div>
+                                            <div className="transaction-metric">
+                                                <span className="hash-label">Time</span>
+                                                <span className="transaction-time">{formatTimestamp(tx.timestamp)}</span>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </article>
+                    </>
+                ) : !errorMessage ? (
+                    <p className="empty-state">Loading block...</p>
+                ) : null}
             </section>
         </PageScaffold>
     );
@@ -2636,6 +2824,7 @@ export default function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/wallet" element={<WalletDashboardPage />} />
                 <Route path="/wallets/:address" element={<WalletPage />} />
+                <Route path="/blocks/:blockId" element={<BlockPage />} />
                 <Route path="/blockchain" element={<BlockchainPage />} />
                 <Route path="/stat" element={<StatPage />} />
             </Routes>

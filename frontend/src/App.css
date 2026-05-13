@@ -1848,3 +1848,32 @@ body::-webkit-scrollbar-thumb {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+.block-id-link {
+  text-decoration: none;
+  display: inline-block;
+}
+
+.block-id-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.block-page-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.transaction-block-link {
+  color: #8c2f0e;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: monospace;
+  text-decoration: none;
+}
+
+.transaction-block-link:hover {
+  text-decoration: underline;
+}

@@ -64,3 +64,20 @@ export async function getSupplyHistory(maxPoints = 500): Promise<SupplyHistoryRe
 
     return (await response.json()) as SupplyHistoryResponse;
 }
+
+export type BlockDetailResponse = {
+    block: BlockchainBlock;
+    prev_block_id: number | null;
+    next_block_id: number | null;
+    total_blocks: number;
+};
+
+export async function getBlock(blockId: number): Promise<BlockDetailResponse> {
+    const response = await fetch(`${API_BASE_URL}/blocks/${blockId}`);
+
+    if (!response.ok) {
+        throw new Error(`Block ${blockId} not found`);
+    }
+
+    return (await response.json()) as BlockDetailResponse;
+}
