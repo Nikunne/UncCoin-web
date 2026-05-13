@@ -120,10 +120,14 @@ supply_history_cache: Dict[str, Any] = {}
 supply_history_cache_lock = asyncio.Lock()
 SUPPLY_HISTORY_CACHE_TTL_SECONDS = 600
 SUPPLY_HISTORY_REFRESH_INTERVAL_SECONDS = 120
+# all_blocks_cache holds the complete ordered block list and is maintained
+# incrementally — never rebuilt after startup.
 all_blocks_cache: Dict[str, Any] = {}
 all_blocks_cache_lock = asyncio.Lock()
-ALL_BLOCKS_CACHE_TTL_SECONDS = 60
 blockchain_tip_height: int = -1
+wallet_stats_cache: Dict[str, Any] = {}
+wallet_stats_cache_lock = asyncio.Lock()
+WALLET_STATS_CACHE_TTL_SECONDS = 10
 browser_wallets: Dict[str, Dict[str, Any]] = {}
 browser_wallets_lock = asyncio.Lock()
 wallet_sessions: Dict[str, Dict[str, str]] = {}
@@ -517,13 +521,8 @@ async def get_wallet_summary(
     return build_wallet_stats(wallet_address, balance or 0.0, chain_data, activity_limit=activity_limit)
 
 
-async def fetch_all_blocks_cached() -> list[Dict[str, Any]]:
-    import time
-    async with all_blocks_cache_lock:
-        cached = all_blocks_cache.get("blocks")
-        if cached and time.monotonic() - cached["cached_at"] < ALL_BLOCKS_CACHE_TTL_SECONDS:
-            return cached["data"]
-
+async def _fetch_all_blocks_from_api() -> list[Dict[str, Any]]:
+    """Full chain fetch from rigga — called only once at startup."""
     all_blocks: list[Dict[str, Any]] = []
     batch_size = 500
     from_height = 0
@@ -547,17 +546,50 @@ async def fetch_all_blocks_cached() -> list[Dict[str, Any]]:
             from_height += len(blocks)
             if len(blocks) < batch_size:
                 break
+    return all_blocks
+
+
+async def fetch_all_blocks_cached() -> list[Dict[str, Any]]:
+    """Return the full block list. Populated once at startup, then kept current by incremental updates."""
+    async with all_blocks_cache_lock:
+        cached = all_blocks_cache.get("blocks")
+        if cached is not None:
+            return cached
+
+    # Cache not yet populated — do the full fetch now
+    all_blocks = await _fetch_all_blocks_from_api()
 
     async with all_blocks_cache_lock:
-        all_blocks_cache["blocks"] = {"data": all_blocks, "cached_at": time.monotonic()}
+        # Another coroutine may have beaten us; don't overwrite a more up-to-date list
+        if all_blocks_cache.get("blocks") is None:
+            all_blocks_cache["blocks"] = all_blocks
 
     return all_blocks
 
 
+async def _prewarm_all_blocks_cache() -> None:
+    try:
+        await fetch_all_blocks_cached()
+        print("[all_blocks_cache] prewarm complete")
+    except Exception as error:
+        print(f"[all_blocks_cache] prewarm failed: {error}")
+
+
 async def get_full_wallet_summary(wallet_address: str) -> Dict[str, Any]:
+    import time
+    async with wallet_stats_cache_lock:
+        cached = wallet_stats_cache.get(wallet_address)
+        if cached and time.monotonic() - cached["at"] < WALLET_STATS_CACHE_TTL_SECONDS:
+            return cached["data"]
+
     all_blocks = await fetch_all_blocks_cached()
     balance = await get_wallet_balance(wallet_address)
-    return build_wallet_stats(wallet_address, balance or 0.0, {"blocks": all_blocks})
+    result = build_wallet_stats(wallet_address, balance or 0.0, {"blocks": all_blocks})
+
+    async with wallet_stats_cache_lock:
+        wallet_stats_cache[wallet_address] = {"data": result, "at": time.monotonic()}
+
+    return result
 
 
 async def get_bonus_amount_setting() -> str:
@@ -840,9 +872,26 @@ async def load_blockchain_incremental() -> None:
                     combined = combined[-1000:]
                 blockchain["blocks"] = combined
 
-            # Invalidate the all-blocks cache so wallet pages re-fetch
+            # Append new blocks to the all-blocks cache (never rebuild from scratch)
             async with all_blocks_cache_lock:
-                all_blocks_cache.pop("blocks", None)
+                if all_blocks_cache.get("blocks") is not None:
+                    all_blocks_cache["blocks"] = all_blocks_cache["blocks"] + new_blocks
+
+            # Invalidate wallet stats for any address that appears in the new blocks
+            affected: set[str] = set()
+            for b in new_blocks:
+                for tx in b.get("transactions", []):
+                    for key in ("sender", "receiver"):
+                        addr = tx.get(key, "")
+                        if isinstance(addr, str) and addr and addr != "SYSTEM":
+                            affected.add(addr)
+                desc = b.get("description", "")
+                if isinstance(desc, str) and desc:
+                    affected.add(desc)
+            if affected:
+                async with wallet_stats_cache_lock:
+                    for addr in affected:
+                        wallet_stats_cache.pop(addr, None)
 
         if isinstance(pending_resp, httpx.Response) and pending_resp.status_code == 200:
             pending_data = pending_resp.json()
@@ -1645,6 +1694,7 @@ async def lifespan(app: FastAPI):
     await load_balances_once()
     await load_blockchain_once()
     asyncio.create_task(_prewarm_supply_history_cache())
+    asyncio.create_task(_prewarm_all_blocks_cache())
     refresh_task = asyncio.create_task(refresh_loop())
     supply_history_refresh_task = asyncio.create_task(supply_history_refresh_loop())
     if API_SWEEP_ENABLED and BETTING_SHARK_ADDRESS:
