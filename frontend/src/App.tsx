@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Link, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
 import { getBlockchain, getSupplyHistory, type BlockchainBlock, type BlockchainResponse, type SupplyHistoryPoint } from "./api/blockchain";
 import {
@@ -7,6 +7,7 @@ import {
     createBrowserWallet,
     getBonusAmount,
     getWalletSession,
+    getWalletSummary,
     loginWithWallet,
     logoutWalletSession,
     sendWalletTransaction,
@@ -684,16 +685,13 @@ function HomePage() {
                 <div className="balances-card">
                     {[...balances].reverse().map(([user, amount]) => (
                         <div key={user} className="balance-row">
-                            <button
-                                className={getWalletAddressClassName("balance-user", user)}
-                                type="button"
-                                onClick={() => {
-                                    void copyAddress(user);
-                                }}
-                                title={`Copy ${user}`}
+                            <Link
+                                className={getWalletAddressClassName("balance-user balance-user-link", user)}
+                                to={`/wallets/${encodeURIComponent(user)}`}
+                                title={`View wallet ${user}`}
                             >
                                 {user}
-                            </button>
+                            </Link>
                             <div className="balance-row-footer">
                                 <span className="balance-amount">{amount}</span>
                                 <button
@@ -2237,6 +2235,196 @@ function BlockchainPage() {
     );
 }
 
+function WalletPage() {
+    const { address } = useParams<{ address: string }>();
+    const [wallet, setWallet] = useState<WalletSummary | null>(null);
+    const [chainData, setChainData] = useState<BlockchainResponse | null>(null);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [errorMessage, setErrorMessage] = useState("");
+    const [historyAddressFilter, setHistoryAddressFilter] = useState("");
+
+    useEffect(() => {
+        if (!address) return;
+
+        let active = true;
+
+        const load = async () => {
+            try {
+                const [summary, chain] = await Promise.all([
+                    getWalletSummary(address),
+                    getBlockchain(),
+                ]);
+                if (active) {
+                    setWallet(summary);
+                    setChainData(chain);
+                    setLastUpdated(new Date());
+                    setErrorMessage("");
+                }
+            } catch (error) {
+                if (active) {
+                    setErrorMessage(error instanceof Error ? error.message : "Failed to load wallet");
+                }
+            }
+        };
+
+        void load();
+        const timer = window.setInterval(() => void load(), 30_000);
+
+        return () => {
+            active = false;
+            window.clearInterval(timer);
+        };
+    }, [address]);
+
+    const displayName = address ? getWalletDisplayName(address, chainData) : "";
+    const showAddressSubtitle = displayName !== address;
+
+    const filteredActivity = wallet?.activity.filter((activity) => {
+        if (!historyAddressFilter.trim()) return true;
+        const q = historyAddressFilter.trim().toLowerCase();
+        return (
+            activity.sender.toLowerCase().includes(q) ||
+            activity.receiver.toLowerCase().includes(q)
+        );
+    }) ?? [];
+
+    return (
+        <PageScaffold>
+            <PageNav items={buildPrimaryNavItems("balances")} />
+            <header className="masthead masthead-left">
+                <p className="masthead-kicker">
+                    <Link className="wallet-back-link" to="/">← Back to balances</Link>
+                </p>
+                <h1 className="balances-title">
+                    {displayName || address || "Wallet"}
+                </h1>
+                {showAddressSubtitle ? (
+                    <p className="masthead-subtitle">{address}</p>
+                ) : null}
+            </header>
+
+            <section className="balances-shell" aria-label="Wallet details">
+                <div className="balances-meta">
+                    <span className="balances-section-title">Wallet Overview</span>
+                    <p className="last-updated">
+                        Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : "loading..."}
+                    </p>
+                </div>
+
+                {errorMessage ? <p className="wallet-login-error">{errorMessage}</p> : null}
+
+                <div className="chain-stats">
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Balance</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.balance ?? 0)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Transactions</span>
+                        <strong className="chain-stat-value">{wallet?.transaction_count ?? 0}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Received</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_received ?? 0)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Sent</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_sent ?? 0)}</strong>
+                    </article>
+                </div>
+
+                <div className="chain-stats">
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Incoming Tx</span>
+                        <strong className="chain-stat-value">{wallet?.received_count ?? 0}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Outgoing Tx</span>
+                        <strong className="chain-stat-value">{wallet?.sent_count ?? 0}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Fees Paid</span>
+                        <strong className="chain-stat-value">{formatWalletAmount(wallet?.total_fees_paid ?? 0)}</strong>
+                    </article>
+                    <article className="chain-stat-card">
+                        <span className="chain-stat-label">Mined Blocks</span>
+                        <strong className="chain-stat-value">{wallet?.mined_block_count ?? 0}</strong>
+                    </article>
+                </div>
+
+                <article className="chain-wallet-card wallet-activity-card">
+                    <span className="chain-stat-label">Latest Activity</span>
+                    <strong className="wallet-activity-value">
+                        {wallet?.latest_activity ? formatTimestamp(wallet.latest_activity) : "No on-chain activity yet"}
+                    </strong>
+                </article>
+
+                <article className="chain-wallet-card wallet-history-card">
+                    <div className="wallet-history-header">
+                        <span className="chain-stat-label">Transaction History</span>
+                        <span className="wallet-history-count">{wallet?.activity.length ?? 0} entries</span>
+                    </div>
+
+                    <input
+                        className="wallet-login-input"
+                        placeholder="Filter by address..."
+                        value={historyAddressFilter}
+                        onChange={(e) => setHistoryAddressFilter(e.target.value)}
+                    />
+
+                    <div className="transaction-list wallet-history-list">
+                        {wallet?.activity.length ? (
+                            filteredActivity.map((activity, index) => (
+                                <div
+                                    key={`${activity.block_id ?? "no-block"}-${activity.timestamp ?? "no-time"}-${index}`}
+                                    className="transaction-row wallet-history-row"
+                                >
+                                    <div>
+                                        <span className="hash-label">{getActivityTitle(activity)}</span>
+                                        <code
+                                            className={getWalletAddressClassName(
+                                                "hash-value",
+                                                activity.kind === "sent" ? activity.receiver : activity.sender,
+                                            )}
+                                            title={activity.kind === "sent" ? activity.receiver : activity.sender}
+                                        >
+                                            {activity.kind === "mined"
+                                                ? "SYSTEM → You"
+                                                : activity.kind === "sent"
+                                                  ? `To: ${activity.receiver}`
+                                                  : `From: ${activity.sender}`}
+                                        </code>
+                                    </div>
+                                    <div>
+                                        <span className="hash-label">Amount</span>
+                                        <span className="transaction-amount">{formatActivityAmount(activity)}</span>
+                                    </div>
+                                    <div>
+                                        <span className="hash-label">Fee</span>
+                                        <span className="transaction-time">
+                                            {activity.fee > 0 ? `${formatWalletAmount(activity.fee)} UNC` : "0 UNC"}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span className="hash-label">Time</span>
+                                        <span className="transaction-time">
+                                            {activity.timestamp ? formatTimestamp(activity.timestamp) : "No timestamp"}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="empty-state">{wallet ? "No transactions found." : "Loading..."}</p>
+                        )}
+                        {wallet?.activity.length && historyAddressFilter.trim() && filteredActivity.length === 0 ? (
+                            <p className="empty-state">No transactions match that address.</p>
+                        ) : null}
+                    </div>
+                </article>
+            </section>
+        </PageScaffold>
+    );
+}
+
 function RedAlertOverlay({ onDismiss }: { onDismiss: () => void }) {
     return (
         <div className="red-alert-overlay" role="dialog" aria-modal="true" aria-label="Red alert crisis overlay">
@@ -2434,6 +2622,7 @@ export default function App() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/wallet" element={<WalletDashboardPage />} />
+                <Route path="/wallets/:address" element={<WalletPage />} />
                 <Route path="/blockchain" element={<BlockchainPage />} />
                 <Route path="/stat" element={<StatPage />} />
             </Routes>

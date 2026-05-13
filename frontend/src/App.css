@@ -1807,3 +1807,25 @@ body::-webkit-scrollbar-thumb {
     display: none;
   }
 }
+
+.balance-user-link {
+  text-decoration: none;
+  display: block;
+}
+
+.balance-user-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.wallet-back-link {
+  color: #8c2f0e;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.04rem;
+}
+
+.wallet-back-link:hover {
+  text-decoration: underline;
+}
