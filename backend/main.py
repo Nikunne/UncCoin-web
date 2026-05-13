@@ -1920,7 +1920,7 @@ async def update_bonus_amount(
 
 @app.get("/wallets/{wallet_address}")
 async def get_wallet(wallet_address: str) -> Dict[str, Any]:
-    return await get_wallet_summary(wallet_address)
+    return await get_wallet_summary(wallet_address, require_chain_presence=False)
 
 
 async def _compute_supply_history(max_points: int) -> Dict[str, Any]:

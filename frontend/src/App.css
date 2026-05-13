@@ -1829,3 +1829,22 @@ body::-webkit-scrollbar-thumb {
 .wallet-back-link:hover {
   text-decoration: underline;
 }
+
+.wallet-page-address {
+  display: block;
+  font-size: 0.78rem;
+  word-break: break-all;
+  color: #a07050;
+  font-family: monospace;
+  margin-top: 4px;
+}
+
+.hash-value-link {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.hash-value-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

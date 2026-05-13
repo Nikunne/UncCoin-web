@@ -2035,15 +2035,16 @@ function BlockchainPage() {
 
                                             return (
                                                 <>
-                                        <code
+                                        <Link
                                             className={getWalletAddressClassName(
-                                                "hash-value blockchain-distribution-address",
+                                                "hash-value hash-value-link blockchain-distribution-address",
                                                 address,
                                             )}
+                                            to={`/wallets/${encodeURIComponent(address)}`}
                                             title={address}
                                         >
                                             {displayName}
-                                        </code>
+                                        </Link>
                                                     {showAddressSubtitle ? (
                                                         <span className="blockchain-distribution-subtitle">
                                                             {address}
@@ -2168,27 +2169,31 @@ function BlockchainPage() {
                                             <div className="transaction-route">
                                                 <span className="hash-label">Route</span>
                                                 <div className="transaction-route-values">
-                                                    <code
-                                                        className={getWalletAddressClassName(
-                                                            "hash-value",
-                                                            transaction.sender,
-                                                        )}
-                                                        title={transaction.sender}
-                                                    >
-                                                        {transaction.sender}
-                                                    </code>
+                                                    {transaction.sender === "SYSTEM" ? (
+                                                        <code className="hash-value" title={transaction.sender}>{transaction.sender}</code>
+                                                    ) : (
+                                                        <Link
+                                                            className={getWalletAddressClassName("hash-value hash-value-link", transaction.sender)}
+                                                            to={`/wallets/${encodeURIComponent(transaction.sender)}`}
+                                                            title={transaction.sender}
+                                                        >
+                                                            {getWalletDisplayName(transaction.sender, blockchain)}
+                                                        </Link>
+                                                    )}
                                                     <span className="transaction-route-arrow" aria-hidden="true">
                                                         →
                                                     </span>
-                                                    <code
-                                                        className={getWalletAddressClassName(
-                                                            "hash-value",
-                                                            transaction.receiver,
-                                                        )}
-                                                        title={transaction.receiver}
-                                                    >
-                                                        {transaction.receiver}
-                                                    </code>
+                                                    {transaction.receiver === "SYSTEM" ? (
+                                                        <code className="hash-value" title={transaction.receiver}>{transaction.receiver}</code>
+                                                    ) : (
+                                                        <Link
+                                                            className={getWalletAddressClassName("hash-value hash-value-link", transaction.receiver)}
+                                                            to={`/wallets/${encodeURIComponent(transaction.receiver)}`}
+                                                            title={transaction.receiver}
+                                                        >
+                                                            {getWalletDisplayName(transaction.receiver, blockchain)}
+                                                        </Link>
+                                                    )}
                                                 </div>
                                             </div>
                                             <div className="transaction-metric">
@@ -2296,11 +2301,13 @@ function WalletPage() {
                     <Link className="wallet-back-link" to="/">← Back to balances</Link>
                 </p>
                 <h1 className="balances-title">
-                    {displayName || address || "Wallet"}
+                    {showAddressSubtitle ? displayName : "Wallet"}
                 </h1>
-                {showAddressSubtitle ? (
-                    <p className="masthead-subtitle">{address}</p>
-                ) : null}
+                <p className="masthead-subtitle">
+                    <code className={getWalletAddressClassName("wallet-page-address", address ?? "")}>
+                        {address}
+                    </code>
+                </p>
             </header>
 
             <section className="balances-shell" aria-label="Wallet details">
@@ -2373,26 +2380,31 @@ function WalletPage() {
 
                     <div className="transaction-list wallet-history-list">
                         {wallet?.activity.length ? (
-                            filteredActivity.map((activity, index) => (
+                            filteredActivity.map((activity, index) => {
+                                const counterparty = activity.kind === "sent" ? activity.receiver : activity.sender;
+                                const isSystem = counterparty === "SYSTEM";
+                                return (
                                 <div
                                     key={`${activity.block_id ?? "no-block"}-${activity.timestamp ?? "no-time"}-${index}`}
                                     className="transaction-row wallet-history-row"
                                 >
                                     <div>
                                         <span className="hash-label">{getActivityTitle(activity)}</span>
-                                        <code
-                                            className={getWalletAddressClassName(
-                                                "hash-value",
-                                                activity.kind === "sent" ? activity.receiver : activity.sender,
-                                            )}
-                                            title={activity.kind === "sent" ? activity.receiver : activity.sender}
-                                        >
-                                            {activity.kind === "mined"
-                                                ? "SYSTEM → You"
-                                                : activity.kind === "sent"
-                                                  ? `To: ${activity.receiver}`
-                                                  : `From: ${activity.sender}`}
-                                        </code>
+                                        {activity.kind === "mined" ? (
+                                            <code className="hash-value">SYSTEM → You</code>
+                                        ) : isSystem ? (
+                                            <code className={getWalletAddressClassName("hash-value", counterparty)} title={counterparty}>
+                                                {activity.kind === "sent" ? `To: ${counterparty}` : `From: ${counterparty}`}
+                                            </code>
+                                        ) : (
+                                            <Link
+                                                className={getWalletAddressClassName("hash-value hash-value-link", counterparty)}
+                                                to={`/wallets/${encodeURIComponent(counterparty)}`}
+                                                title={counterparty}
+                                            >
+                                                {activity.kind === "sent" ? `To: ${getWalletDisplayName(counterparty, chainData)}` : `From: ${getWalletDisplayName(counterparty, chainData)}`}
+                                            </Link>
+                                        )}
                                     </div>
                                     <div>
                                         <span className="hash-label">Amount</span>
@@ -2411,7 +2423,8 @@ function WalletPage() {
                                         </span>
                                     </div>
                                 </div>
-                            ))
+                                );
+                            })
                         ) : (
                             <p className="empty-state">{wallet ? "No transactions found." : "Loading..."}</p>
                         )}
