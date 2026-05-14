@@ -553,16 +553,17 @@ async def fetch_all_blocks_cached() -> list[Dict[str, Any]]:
     """Return the full block list. Populated once at startup, then kept current by incremental updates."""
     async with all_blocks_cache_lock:
         cached = all_blocks_cache.get("blocks")
-        if cached is not None:
+        if cached:
             return cached
 
-    # Cache not yet populated — do the full fetch now
+    # Cache not yet populated (or previous fetch returned nothing) — fetch now
     all_blocks = await _fetch_all_blocks_from_api()
 
-    async with all_blocks_cache_lock:
-        # Another coroutine may have beaten us; don't overwrite a more up-to-date list
-        if all_blocks_cache.get("blocks") is None:
-            all_blocks_cache["blocks"] = all_blocks
+    if all_blocks:
+        async with all_blocks_cache_lock:
+            # Another coroutine may have beaten us; don't overwrite a more up-to-date list
+            if not all_blocks_cache.get("blocks"):
+                all_blocks_cache["blocks"] = all_blocks
 
     return all_blocks
 
