@@ -1436,11 +1436,14 @@ class NodeApiRunner:
             return str(resp.json().get("transaction_id", ""))
 
     def check_for_peer_rejection(self, since_index: int) -> None:
+        # Log-scanning is unreliable after broadcast: peers may reject for stale-state
+        # reasons while the tx still gets mined. node_command_lock prevents nonce collisions.
+        # Raising here causes false-positive failures (bigdick refunds a tx that went through).
         for line in reversed(list(self.output_lines)[since_index:]):
             if "nonce does not match" in line or (
                 "Rejected transaction" in line and "Rejected local transaction" not in line
             ):
-                raise HTTPException(status_code=409, detail=f"Transaction rejected by network: {line.strip()}")
+                print(f"[peer-rejection-warning] {line.strip()}")
 
     async def close(self) -> None:
         if self.process is None:
@@ -1609,16 +1612,15 @@ async def send_unccoin_transaction_with_bonus(
             if on_broadcast:
                 await on_broadcast()
 
-            # Wait for peer rejection propagation (e.g. nonce mismatch from a forked peer),
-            # and long enough for the local rigga node to forward the tx to its external peers.
-            await asyncio.sleep(6)
+            # Brief wait for the tx to propagate to the local rigga node before we close.
+            await asyncio.sleep(3)
             runner.check_for_peer_rejection(pre_tx_index)
 
             if bonus_decimal > 0:
                 try:
                     bonus_index = len(runner.output_lines)
                     await runner.send_transaction(BONUS_RECEIVER_ADDRESS, str(bonus_decimal), "0")
-                    await asyncio.sleep(4)
+                    await asyncio.sleep(2)
                     runner.check_for_peer_rejection(bonus_index)
                 except HTTPException as bonus_error:
                     print(f"Bonus tx failed after main tx (sender {wallet_address}): {bonus_error.detail}")
