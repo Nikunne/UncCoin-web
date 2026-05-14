@@ -931,6 +931,29 @@ body::-webkit-scrollbar-thumb {
   grid-template-columns: minmax(0, 2fr) auto auto minmax(0, 1.3fr);
 }
 
+.wallet-load-more-button {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 220, 156, 0.35);
+  background: rgba(20, 10, 4, 0.55);
+  color: #f0d4a0;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.1rem;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.wallet-load-more-button:hover,
+.wallet-load-more-button:focus-visible {
+  border-color: rgba(255, 229, 180, 0.8);
+  color: #fff8e6;
+}
+
 .wallet-activity-value {
   display: block;
   color: #fff0c9;

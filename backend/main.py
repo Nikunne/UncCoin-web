@@ -106,6 +106,7 @@ API_SWEEP_INTERVAL_SECONDS = int(os.getenv("UNC_API_SWEEP_INTERVAL_SECONDS", "60
 API_SWEEP_FEE = os.getenv("UNC_API_SWEEP_FEE", "0").strip()
 WALLET_WARMUP_ENABLED = os.getenv("UNC_WALLET_WARMUP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 WALLET_WARMUP_INTERVAL_SECONDS = int(os.getenv("UNC_WALLET_WARMUP_INTERVAL_SECONDS", "300"))
+ALL_WALLETS_WARMUP_INTERVAL_SECONDS = int(os.getenv("UNC_ALL_WALLETS_WARMUP_INTERVAL_SECONDS", "300"))
 CORS_ALLOWED_ORIGINS = tuple(
     origin.strip()
     for origin in os.getenv("UNC_CORS_ALLOWED_ORIGINS", "").split(",")
@@ -127,7 +128,7 @@ all_blocks_cache_lock = asyncio.Lock()
 blockchain_tip_height: int = -1
 wallet_stats_cache: Dict[str, Any] = {}
 wallet_stats_cache_lock = asyncio.Lock()
-WALLET_STATS_CACHE_TTL_SECONDS = 10
+WALLET_STATS_CACHE_TTL_SECONDS = 60
 browser_wallets: Dict[str, Dict[str, Any]] = {}
 browser_wallets_lock = asyncio.Lock()
 wallet_sessions: Dict[str, Dict[str, str]] = {}
@@ -139,6 +140,7 @@ login_attempts_lock = asyncio.Lock()
 refresh_task: asyncio.Task | None = None
 api_sweep_task: asyncio.Task | None = None
 wallet_warmup_task: asyncio.Task | None = None
+all_wallets_warmup_task: asyncio.Task | None = None
 supply_history_refresh_task: asyncio.Task | None = None
 rigga_node_task: asyncio.Task | None = None
 wallet_last_warmed: Dict[str, float] = {}
@@ -1507,6 +1509,47 @@ async def wallet_warmup_loop() -> None:
             await warm_wallet_node(target)
 
 
+async def all_wallets_warmup_loop() -> None:
+    import time as _time
+    while True:
+        async with all_blocks_cache_lock:
+            all_blocks = list(all_blocks_cache.get("blocks") or [])
+
+        if not all_blocks:
+            await asyncio.sleep(60)
+            continue
+
+        addresses: set[str] = set()
+        for block in all_blocks:
+            for tx in block.get("transactions", []):
+                for key in ("sender", "receiver"):
+                    addr = tx.get(key, "")
+                    if isinstance(addr, str) and addr and addr != "SYSTEM":
+                        addresses.add(addr)
+            desc = block.get("description", "")
+            if isinstance(desc, str) and desc:
+                addresses.add(desc)
+
+        if not addresses:
+            await asyncio.sleep(60)
+            continue
+
+        sleep_per = max(0.5, ALL_WALLETS_WARMUP_INTERVAL_SECONDS / len(addresses))
+
+        for address in addresses:
+            async with wallet_stats_cache_lock:
+                cached = wallet_stats_cache.get(address)
+                if cached and _time.monotonic() - cached["at"] < WALLET_STATS_CACHE_TTL_SECONDS:
+                    continue
+            try:
+                await get_full_wallet_summary(address)
+            except Exception:
+                pass
+            await asyncio.sleep(sleep_per)
+
+        await asyncio.sleep(max(0, ALL_WALLETS_WARMUP_INTERVAL_SECONDS - len(addresses) * sleep_per))
+
+
 async def send_unccoin_transaction_with_bonus(
     wallet_record: Dict[str, Any],
     receiver_address: str,
@@ -1702,6 +1745,7 @@ async def lifespan(app: FastAPI):
         api_sweep_task = asyncio.create_task(api_sweep_loop())
     if WALLET_WARMUP_ENABLED:
         wallet_warmup_task = asyncio.create_task(wallet_warmup_loop())
+    all_wallets_warmup_task = asyncio.create_task(all_wallets_warmup_loop())
 
     try:
         yield
@@ -1734,6 +1778,12 @@ async def lifespan(app: FastAPI):
             wallet_warmup_task.cancel()
             try:
                 await wallet_warmup_task
+            except asyncio.CancelledError:
+                pass
+        if all_wallets_warmup_task:
+            all_wallets_warmup_task.cancel()
+            try:
+                await all_wallets_warmup_task
             except asyncio.CancelledError:
                 pass
 
@@ -1931,7 +1981,11 @@ async def wallet_send_stream(
         task = asyncio.create_task(run())
         try:
             while True:
-                event = await event_queue.get()
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=25.0)
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+                    continue
                 yield f"data: {json.dumps(event)}\n\n"
                 if event["status"] in ("done", "error"):
                     break

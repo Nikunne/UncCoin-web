@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { getBalances, type BalanceRow } from "./api/balances";
 import { getBlock, getBlockchain, getSupplyHistory, type BlockDetailResponse, type BlockchainBlock, type BlockchainResponse, type SupplyHistoryPoint } from "./api/blockchain";
@@ -41,6 +41,7 @@ const MOBILE_CHART_PADDING_BOTTOM = 58;
 const MOBILE_CHART_TICK_COUNT = 3;
 const MOBILE_CHART_Y_TICK_COUNT = 4;
 const MOBILE_MAX_SUPPLY_CHART_POINTS = 60;
+const WALLET_HISTORY_PAGE_SIZE = 25;
 const WALLET_SESSION_TOKEN_KEY = "unc-wallet-session-token";
 const WALLET_SESSION_META_KEY = "unc-wallet-session-meta";
 const BONUS_AMOUNT_STORAGE_KEY = "unc-bonus-amount";
@@ -2245,6 +2246,7 @@ function WalletPage() {
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [errorMessage, setErrorMessage] = useState("");
     const [historyAddressFilter, setHistoryAddressFilter] = useState("");
+    const [visibleCount, setVisibleCount] = useState(WALLET_HISTORY_PAGE_SIZE);
 
     useEffect(() => {
         if (!address) return;
@@ -2282,14 +2284,25 @@ function WalletPage() {
     const displayName = address ? getWalletDisplayName(address, chainData) : "";
     const showAddressSubtitle = displayName !== address;
 
+    const counterpartyAddresses = useMemo(() => {
+        if (!wallet) return [];
+        const seen = new Set<string>();
+        for (const activity of wallet.activity) {
+            const cp = activity.kind === "sent" ? activity.receiver : activity.sender;
+            if (cp && cp !== "SYSTEM" && cp !== wallet.wallet_address) {
+                seen.add(cp);
+            }
+        }
+        return Array.from(seen).sort((a, b) => a.localeCompare(b));
+    }, [wallet]);
+
     const filteredActivity = wallet?.activity.filter((activity) => {
-        if (!historyAddressFilter.trim()) return true;
-        const q = historyAddressFilter.trim().toLowerCase();
-        return (
-            activity.sender.toLowerCase().includes(q) ||
-            activity.receiver.toLowerCase().includes(q)
-        );
+        if (!historyAddressFilter) return true;
+        return activity.sender === historyAddressFilter || activity.receiver === historyAddressFilter;
     }) ?? [];
+
+    const visibleActivity = filteredActivity.slice(0, visibleCount);
+    const hasMore = filteredActivity.length > visibleCount;
 
     return (
         <PageScaffold>
@@ -2369,16 +2382,25 @@ function WalletPage() {
                         <span className="wallet-history-count">{wallet?.activity.length ?? 0} entries</span>
                     </div>
 
-                    <input
-                        className="wallet-login-input"
-                        placeholder="Filter by address..."
+                    <select
+                        className="blockchain-select"
                         value={historyAddressFilter}
-                        onChange={(e) => setHistoryAddressFilter(e.target.value)}
-                    />
+                        onChange={(e) => {
+                            setHistoryAddressFilter(e.target.value);
+                            setVisibleCount(WALLET_HISTORY_PAGE_SIZE);
+                        }}
+                    >
+                        <option value="">All transactions</option>
+                        {counterpartyAddresses.map((addr) => (
+                            <option key={addr} value={addr}>
+                                {getWalletDisplayName(addr, chainData)} — {addr.slice(0, 12)}…
+                            </option>
+                        ))}
+                    </select>
 
                     <div className="transaction-list wallet-history-list">
                         {wallet?.activity.length ? (
-                            filteredActivity.map((activity, index) => {
+                            visibleActivity.map((activity, index) => {
                                 const counterparty = activity.kind === "sent" ? activity.receiver : activity.sender;
                                 const isSystem = counterparty === "SYSTEM";
                                 return (
@@ -2434,8 +2456,16 @@ function WalletPage() {
                         ) : (
                             <p className="empty-state">{wallet ? "No transactions found." : "Loading..."}</p>
                         )}
-                        {wallet?.activity.length && historyAddressFilter.trim() && filteredActivity.length === 0 ? (
-                            <p className="empty-state">No transactions match that address.</p>
+                        {wallet?.activity.length && historyAddressFilter && filteredActivity.length === 0 ? (
+                            <p className="empty-state">No transactions for that address.</p>
+                        ) : null}
+                        {hasMore ? (
+                            <button
+                                className="wallet-load-more-button"
+                                onClick={() => setVisibleCount((c) => c + WALLET_HISTORY_PAGE_SIZE)}
+                            >
+                                Load more — {filteredActivity.length - visibleCount} remaining
+                            </button>
                         ) : null}
                     </div>
                 </article>
