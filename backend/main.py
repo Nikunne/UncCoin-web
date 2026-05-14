@@ -57,6 +57,7 @@ BROWSER_WALLETS_FILE = BASE_DIR / "browser_wallets.json"
 APP_SETTINGS_FILE = BASE_DIR / "app_settings.json"
 BLOCKCHAIN_REFRESH_SECONDS = int(os.getenv("UNC_BLOCKCHAIN_REFRESH_SECONDS", "2"))
 BALANCES_REFRESH_SECONDS = int(os.getenv("UNC_BALANCES_REFRESH_SECONDS", "10"))
+RIGGA_SYNC_INTERVAL_SECONDS = int(os.getenv("UNC_RIGGA_SYNC_INTERVAL_SECONDS", "15"))
 NODE_PORT_START = int(os.getenv("UNC_NODE_PORT_START", "8300"))
 NODE_PORT_END = int(os.getenv("UNC_NODE_PORT_END", "8500"))
 NODE_READY_TIMEOUT_SECONDS = int(os.getenv("UNC_NODE_READY_TIMEOUT_SECONDS", "45"))
@@ -910,8 +911,16 @@ async def load_blockchain_incremental() -> None:
 
 async def refresh_loop() -> None:
     balances_last_at = 0.0
+    rigga_sync_last_at = 0.0
     while True:
         now = asyncio.get_running_loop().time()
+        if now - rigga_sync_last_at >= RIGGA_SYNC_INTERVAL_SECONDS:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(f"{RIGGA_API_BASE}/control/sync", json={"fast": True}, timeout=3.0)
+            except Exception:
+                pass
+            rigga_sync_last_at = asyncio.get_running_loop().time()
         await load_blockchain_incremental()
         if now - balances_last_at >= BALANCES_REFRESH_SECONDS:
             await load_balances_once()
@@ -1335,7 +1344,13 @@ class NodeApiRunner:
         # Use run.sh so the correct Python/venv is found the same way as manual usage.
         # stdin=PIPE keeps the interactive console alive (DEVNULL would cause immediate EOF→exit).
         # run.sh auto-sets --api-port as node_port+10000 and passes extra args as --peer.
-        cmd = [str(UNCCOIN_RUN_SCRIPT), self.wallet_name, str(self.node_port)] + list(DEFAULT_PEER_ADDRESSES)
+        peers = list(DEFAULT_PEER_ADDRESSES)
+        # Always include the local rigga node as a peer so the tx propagates through
+        # its established external connections rather than relying solely on DEFAULT_PEER_ADDRESSES.
+        local_peer = f"127.0.0.1:{RIGGA_NODE_P2P_PORT}"
+        if local_peer not in peers:
+            peers.append(local_peer)
+        cmd = [str(UNCCOIN_RUN_SCRIPT), self.wallet_name, str(self.node_port)] + peers
         self.process = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(UNCCOIN_REPO),
@@ -1594,15 +1609,16 @@ async def send_unccoin_transaction_with_bonus(
             if on_broadcast:
                 await on_broadcast()
 
-            # Brief wait for peer rejection propagation (e.g. nonce mismatch from a forked peer)
-            await asyncio.sleep(3)
+            # Wait for peer rejection propagation (e.g. nonce mismatch from a forked peer),
+            # and long enough for the local rigga node to forward the tx to its external peers.
+            await asyncio.sleep(6)
             runner.check_for_peer_rejection(pre_tx_index)
 
             if bonus_decimal > 0:
                 try:
                     bonus_index = len(runner.output_lines)
                     await runner.send_transaction(BONUS_RECEIVER_ADDRESS, str(bonus_decimal), "0")
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(4)
                     runner.check_for_peer_rejection(bonus_index)
                 except HTTPException as bonus_error:
                     print(f"Bonus tx failed after main tx (sender {wallet_address}): {bonus_error.detail}")
